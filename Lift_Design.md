@@ -1,3 +1,6 @@
+<img width="1269" height="603" alt="image" src="https://github.com/user-attachments/assets/636eb44b-cec0-4b71-86bf-b05a1f7dcb92" />
+
+
 # LIFT — Complete Technical Design Document
 
 **Version:** 0.2.0
