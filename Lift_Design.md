@@ -1,817 +1,839 @@
-# LIFT Framework — Complete Technical Design Document
+# LIFT — Complete Technical Design Document
 
-**Version:** 0.1.0-alpha
-**Status:** Research / Pre-Alpha
-**Authors:** Martial-Christian
+**Version:** 0.2.0
+**Status:** Research Alpha — Phase 0 complete, Phase 1 active
+**Incorporates:** All critique from design review (correctness, scalability, security, cost model)
 
 ---
 
 ## Executive Summary
 
-LIFT (Language for Intelligent Frameworks and Technologies) is a unified Intermediate Representation (IR) designed from the ground up to handle both Artificial Intelligence (neural networks, transformers, LLMs) and Quantum Computing (gate circuits, noise models, variational algorithms) within a single coherent framework.
+LIFT is a unified Intermediate Representation for AI and Quantum Computing. Its core thesis: both domains face structurally isomorphic compilation challenges. LIFT exploits this with twin dialects sharing one SSA foundation, one configuration language, and one four-step pipeline: Simulate → Predict → Optimise → Compile.
 
-The core thesis is: **AI computation and Quantum computation are structurally isomorphic in their compilation challenges.** Both require graph-based IR, both need hardware-aware optimisation, both need simulation before hardware execution, and both are moving toward hybrid execution models. LIFT exploits this isomorphism through a *twin dialect* architecture — two specialised sub-languages that can be freely composed.
+This document is the complete technical reference. It covers every design decision, its justification, known limitations, and open problems.
 
 ---
 
-## Part 1: The Problem Space
+## Part 1: Problem Statement
 
-### 1.1 State of AI Compilation (2024)
+### 1.1 AI Compilation: What Is Missing
 
-The modern AI compiler stack is fragmented:
+Current AI IRs (MLIR, ONNX, StableHLO) are good at expressing tensor computations. They lack:
 
-```
-User writes PyTorch → torch.compile → TorchDynamo/FX → MLIR → various backends
-                                                       ↓
-                                      TorchInductor → Triton → PTX → H100
-                                      TensorRT      → CUDA kernels
-                                      XLA           → HLO → TPU backend
-```
+| Missing capability | Consequence |
+|-------------------|-------------|
+| Semantic types for AI primitives | Compiler cannot identify attention patterns to apply FlashAttention |
+| Energy-aware compilation | Training GPT-4 costs $100M+ with no tooling to optimise this |
+| Simulation before execution | Performance surprises discovered only at runtime |
+| Budget enforcement | No automated check that latency / memory targets are met |
 
-Each arrow is a lossy transformation. Information about the *intent* of the computation (this is a causal attention layer, this tensor represents key-value cache state) is lost at every step. The result: sub-optimal code because the compiler never knows the semantic context.
+### 1.2 Quantum Compilation: What Is Missing
 
-**Key problems:**
+Current quantum IRs (OpenQASM 3, QASM, Qiskit's internal DAG) are good at expressing gate circuits. They lack:
 
-| Problem | Impact |
-|---------|--------|
-| Intent loss across IR levels | Missed fusion opportunities |
-| No semantic types for AI primitives | Cannot specialise attention patterns |
-| Static shapes only (partially fixed) | Poor dynamic batching |
-| No energy awareness | Training GPT-4 costs $100M+ |
-| No multi-target unified path | 3 different toolchains for GPU/TPU/CPU |
-
-### 1.2 State of Quantum Compilation (2024)
-
-Quantum compilation is even more fragmented:
-
-```
-Qiskit circuit → transpile() → layout mapping → routing → basis decomposition → run on IBM
-PennyLane QNode → device.execute() → OpenQASM → Qiskit → IBM (via bridge)
-Cirq circuit → cirq.optimize_for_target_gateset() → cirq_google → Google Sycamore
-```
-
-**Key problems:**
-
-| Problem | Impact |
-|---------|--------|
-| No unified IR across providers | Lock-in to single vendor |
-| Noise as afterthought | Poor fidelity predictions |
-| No semantic types (just qubits) | Cannot reason about qubit roles |
-| Manual error mitigation | Expert knowledge required |
-| No simulation-first workflow | Expensive hardware time wasted |
+| Missing capability | Consequence |
+|-------------------|-------------|
+| Noise in the type system | Fidelity only known after QPU execution |
+| No-cloning enforcement (linear types) | Invalid programmes discovered at runtime |
+| Cross-provider portability | Code written for IBM does not run on Rigetti without manual porting |
+| Simulation-first workflow | Expensive QPU time wasted on programmes that will fail |
 
 ### 1.3 The Hybrid Gap
 
-The most critical gap: **no framework handles hybrid AI+Quantum workloads natively.**
-
-Hybrid quantum-classical algorithms (VQE, QAOA, QNN, quantum-enhanced ML) are the most promising near-term quantum applications. Yet to implement one today, a researcher must:
-
-1. Write the classical part in PyTorch
-2. Write the quantum part in Qiskit or PennyLane
-3. Write glue code to pass tensors between them
-4. Write separate optimisation loops for each
-5. Debug failures across two completely different frameworks
-6. Deploy on two completely different backends
-
-LIFT eliminates steps 3-5 and unifies 1-2 into a single file.
+No existing tool handles hybrid AI+Quantum workloads at the IR level. PennyLane is the closest but is a runtime library, not a compiler IR: it provides no static analysis, no simulation-driven compilation, no noise-aware IR, and no joint optimisation of classical and quantum parameters at the IR level.
 
 ---
 
-## Part 2: The Twin Dialects Concept
+## Part 2: Design Principles
 
-### 2.1 What Is a Dialect in LIFT?
+These principles guided every decision. When two approaches conflict, these principles determine which wins.
 
-A LIFT dialect is a namespaced extension of the core IR that adds:
-- **New types** (e.g., `qubit`, `kvcache<...>`)
-- **New operations** (e.g., `quantum.cx`, `tensor.flash_attention`)
-- **New attributes** (e.g., noise model, memory layout)
-- **New verification rules** (e.g., qubits cannot be cloned)
-- **Lowering passes** (e.g., quantum.cx → OpenQASM CX gate)
+**P1 — Correctness over performance.** A compiler that produces wrong results faster is worse than one that is slow and correct. Every pass must be semantics-preserving. Every type rule must be sound.
 
-This follows the MLIR dialect philosophy but with three key differences:
-1. Dialects are designed to be **composed by default**, not as an afterthought
-2. Dialects carry **semantic metadata** that persists through lowering
-3. Dialects support **cross-dialect joint optimisation**
+**P2 — Honesty in the IR.** If information is known at compile time (noise model, tensor shape, qubit connectivity), it must be representable in the IR. Compilers that lose information cannot recover it.
 
-### 2.2 The Structural Isomorphism
+**P3 — Simulation before execution.** The compiler must answer "what will happen?" before the hardware is touched. Budget violations must be compiler errors, not runtime surprises.
 
-The deepest insight in LIFT's design:
+**P4 — Openness.** LIFT must interoperate with existing frameworks (PyTorch, Qiskit, ONNX) via importers and exporters. It must not require users to abandon their existing investments.
 
-```
-AI CONCEPT                          QUANTUM CONCEPT
-──────────                          ───────────────
-Tensor (vector of values)           Quantum state (vector of amplitudes)
-Linear layer (matrix multiply)      Unitary gate (unitary matrix multiply)
-Non-linearity (ReLU, softmax)       Measurement (projection, collapse)
-Backpropagation (reverse AD)        Adjoint differentiation (parameter shift)
-Batch dimension                     Shot parallelism (repeated execution)
-INT8 quantisation                   Gate decomposition to native basis
-Layer fusion                        Gate cancellation and merging
-Memory layout (NCHW vs NHWC)        Qubit mapping (logical to physical)
-Data parallelism (N GPUs)           Multi-QPU execution
-Checkpoint for memory reduction     Mid-circuit measurement and reset
-```
+**P5 — Incremental adoption.** A user can import one PyTorch model into LIFT-TENSOR without touching quantum at all. A user can import one Qiskit circuit into LIFT-QUANTUM without touching AI. The dialects are independent and composable.
 
-This isomorphism means that the **same algorithmic ideas** apply to both domains, just with different semantics. LIFT's twin dialects are *twins* precisely because they solve the same class of problems with different vocabularies.
+---
 
-### 2.3 LIFT-CORE: The Shared Foundation
+## Part 3: LIFT-CORE
 
-Every dialect builds on LIFT-CORE. LIFT-CORE provides:
+### 3.1 The SSA IR
 
-**Values (SSA)**
-Every value in LIFT is defined exactly once. A `Value` carries:
-- A unique identifier (`%v42`)
-- A `CoreType` (the type of the value)
-- An optional debug name
-- A pointer to its defining `Operation`
+LIFT-CORE provides the shared foundation. All dialects build on it.
 
-**Operations**
-An `Operation` is the fundamental unit of computation:
-- A dialect namespace + operation name (`tensor.matmul`, `quantum.cx`)
-- Zero or more input `Value`s
-- One or more output `Value`s
-- A set of `Attribute`s (compile-time constants)
-- A `Location` (source file, line, column)
+**Key data structures:**
 
-**Blocks**
-A `Block` is a basic block in the SSA sense: a sequence of `Operation`s where control flow only enters at the top. Blocks carry block arguments (the SSA equivalent of φ-functions).
+```rust
+// Context: the single source of truth. All IR objects are stored here.
+pub struct Context {
+    values:  SlotMap<ValueKey, ValueData>,   // O(1) lookup by key
+    ops:     SlotMap<OpKey,    OperationData>,
+    blocks:  SlotMap<BlockKey, BlockData>,
+    regions: SlotMap<RegionKey, RegionData>,
+    strings: StringInterner,   // deduplicated string storage
+    types:   TypeInterner,     // deduplicated type storage
+}
 
-**Regions**
-A `Region` is a list of `Block`s. Regions are used to represent nested structure (function bodies, loop bodies, branch arms).
+// A Value is defined exactly once (SSA invariant)
+pub struct ValueData {
+    ty:   TypeId,           // interned type reference
+    name: Option<StringId>, // optional debug name
+    def:  DefSite,          // where this value is defined
+}
 
-**Functions and Modules**
-A `Function` = a name + signature + one `Region`.
-A `Module` = a name + a list of `Function`s + a list of `Global`s + metadata.
+pub enum DefSite {
+    OpResult { op: OpKey, result_index: u32 },
+    BlockArg { block: BlockKey, arg_index: u32 },
+}
 
-```
-Module
-└── Function @attention_layer
-    └── Region
-        ├── Block ^entry(%query: tensor<...>, %key: tensor<...>)
-        │   ├── %scores = tensor.matmul(%query, %key) : ...
-        │   ├── %masked = tensor.add(%scores, %mask) : ...
-        │   ├── %weights = tensor.softmax(%masked) {dim=1} : ...
-        │   └── br ^exit(%weights)
-        └── Block ^exit(%result: tensor<...>)
-            └── return %result
+// An Operation is the unit of computation
+pub struct OperationData {
+    name:     StringId,          // "tensor.matmul", "quantum.cx", etc.
+    dialect:  StringId,
+    inputs:   Vec<ValueKey>,
+    results:  Vec<ValueKey>,
+    attrs:    Attributes,        // compile-time constants
+    regions:  Vec<RegionKey>,    // nested regions (for control flow)
+    location: Location,
+}
 ```
 
-### 2.4 LIFT-TENSOR: The AI Dialect
+**Why SlotMap?** Generational arena gives O(1) lookup and safe invalidation when operations are deleted, without pointer chasing through linked lists. The `SlotMap` crate provides this with well-tested Rust semantics.
 
-LIFT-TENSOR extends LIFT-CORE with semantically rich AI types and operations.
+### 3.2 Type System
 
-**Type System**
-
-The type system in LIFT-TENSOR is more expressive than ONNX or StableHLO:
-
-```
-TensorType ::=
-  | Tensor<Shape, DType, Layout>       -- standard n-dimensional tensor
-  | AttentionTensor<B, S, H, D, DType> -- typed for attention kernels
-  | KVCache<MaxSeq, Heads, Dim, DType> -- typed for LLM inference
-  | SparseTensor<NumExperts, Cap, DType>-- typed for MoE routing
-
-Shape ::= [Dimension, ...]
-Dimension ::= Constant(n) | Symbolic("batch") | Product([Dimension, ...])
-DType ::= FP32 | FP16 | BF16 | FP8_E4M3 | FP8_E5M2 | INT8 | INT4 | INT2
-Layout ::= Contiguous | NCHW | NHWC | Strided(strides) | Tiled(size)
+```rust
+pub enum CoreType {
+    Integer  { bits: u32, signed: bool },  // i8, i16, i32, i64, u8, ...
+    Float    { bits: u32 },                // f16, f32, f64
+    Boolean,
+    Tuple    (Vec<TypeId>),
+    Function { params: Vec<TypeId>, returns: Vec<TypeId> },
+    Opaque   { dialect: StringId, name: StringId, data: TypeData }, // dialect-specific
+    Void,
+}
 ```
 
-The key insight: **`AttentionTensor` carries its semantic role in its type.** The compiler knows this is an attention computation, not just a generic matrix multiply. This enables:
-- Automatic FlashAttention substitution
-- Correct memory layout selection
-- Accurate FLOP counting (attention is O(n²), not O(n))
-- Correct gradient computation (attention backward has specific structure)
+Dialects extend the type system by registering `Opaque` types. For example:
+- `lift-tensor` registers `TensorType`, `AttentionTensorType`, `KVCacheType`
+- `lift-quantum` registers `QubitType` (linear), `PhysicalQubitType`, `HamiltonianType`
 
-**Critical Operations**
+**Type interning:** All types are interned in the `Context`. Structural equality is pointer equality on the interned ID. This makes type checking O(1) in practice.
+
+### 3.3 Verification
+
+The IR verifier checks:
+- SSA: every value is defined before use
+- Dominance: uses dominated by definitions
+- Type consistency: operation inputs/outputs match declared types
+- Linearity: qubit values not used more than once (see Section 4.4)
+- Well-formedness: all keys are valid (not dangling references)
+
+Verification is run after every pass as a debug-mode assertion. In release mode, verification is run once before code generation.
+
+---
+
+## Part 4: LIFT-TENSOR
+
+### 4.1 Semantic Types
+
+The key innovation over generic tensor IRs: types carry semantic meaning.
+
+```rust
+pub enum TensorType {
+    // Standard tensor: shapes, dtype, layout
+    Tensor {
+        shape:  Vec<Dimension>,
+        dtype:  DataType,
+        layout: MemoryLayout,
+    },
+
+    // Semantically typed for attention kernels
+    // The compiler KNOWS this is an attention computation.
+    AttentionTensor {
+        batch:      Dimension,
+        seq_len:    Dimension,
+        num_heads:  usize,
+        head_dim:   usize,
+        dtype:      DataType,
+    },
+
+    // Semantically typed for LLM inference
+    // The compiler knows this is a KV cache.
+    KVCache {
+        max_seq:    Dimension,
+        num_heads:  usize,
+        head_dim:   usize,
+        dtype:      DataType,
+        is_paged:   bool,
+    },
+
+    // Semantically typed for Mixture-of-Experts
+    SparseTensor {
+        num_experts: usize,
+        capacity:    usize,
+        dtype:       DataType,
+    },
+}
+
+pub enum Dimension {
+    Constant(usize),         // known at compile time
+    Symbolic(String),        // e.g., "batch_size", "seq_len"
+    Product(Vec<Dimension>), // composite
+}
+
+pub enum DataType {
+    FP64, FP32, FP16, BF16,
+    FP8_E4M3, FP8_E5M2,     // H100 native FP8
+    INT8, INT4, INT2,
+}
+```
+
+**Why semantic types matter:** When the compiler sees `AttentionTensor`, it can automatically apply FlashAttention without needing a fragile pattern-matching heuristic. The type is the intent. This is the insight that MLIR's generic `memref` types cannot provide.
+
+### 4.2 Attention Operations
 
 ```
-tensor.attention {implementation, causal, scale}
-  → Standard, FlashAttention v2/v3, PagedAttention, SDPA
+tensor.attention {implementation, causal, scale, mask}
+  Implementations:
+    Standard        — O(n²) baseline
+    FlashAttentionV2 — tiled, O(n) memory (Dao et al. 2022)
+    FlashAttentionV3 — H100-optimised, ping-pong warp specialisation
+    PagedAttention   — vLLM-style paged KV cache
+    SDPA             — PyTorch scaled dot product attention
 
 tensor.paged_attention {block_tables, context_len, num_heads, head_dim}
-  → vLLM-style paged KV cache attention
+  For KV-cache-backed inference. Models the paging interface exactly.
 
 tensor.moe_dispatch {num_experts, num_active, capacity}
-  → MoE routing with load balancing
-
-tensor.quantize {quant_type, calibration, per_channel}
-tensor.dequantize {original_type}
-  → INT8/FP8 quantisation with proper rounding semantics
-
-tensor.fused_op {pattern}
-  → Explicitly fused operation (MatMul+Bias+ReLU, etc.)
+tensor.moe_combine
+  Expert routing + combination for Mixture-of-Experts models.
 ```
 
-**Gradient Representation**
+### 4.3 Fusion Pass: Correct Algorithm
+
+**We do not use Ullmann subgraph isomorphism.** Ullmann is O(n!) in the worst case and is impractical for large graphs. We use **declarative pattern matching with topological search**.
+
+```rust
+// A fusion pattern is a small DAG template
+pattern! {
+    name = "matmul_bias_relu",
+    ops  = [
+        %m = "tensor.matmul"(%a, %b),
+        %t = "tensor.add"(%m, %bias),
+        %r = "tensor.relu"(%t)
+    ],
+    // Condition: %m and %t have no other uses outside the pattern
+    condition = single_use(%m) && single_use(%t),
+    replace_with = "tensor.fused_matmul_bias_relu"(%a, %b, %bias)
+}
+```
+
+The matcher runs a topological traversal over the computation DAG. For each node, it checks all patterns whose "anchor op" matches. Pattern matching is O(V + E × P) where P is the number of patterns. In practice P < 50, making this linear.
+
+**Correctness guarantee:** A fusion is only applied if all intermediate values are single-use (no other consumers). This ensures the fused result is observationally equivalent to the original.
+
+### 4.4 Gradient Representation
 
 LIFT-TENSOR represents both forward and backward computation in the same IR:
 
 ```
 // Forward
-%y = tensor.matmul(%A, %B) : (tensor<M×K>, tensor<K×N>) → tensor<M×N>
+%y = tensor.matmul(%A, %B)
 
-// Backward (attached as a region attribute)
-// ∂L/∂A = ∂L/∂y @ B^T
-// ∂L/∂B = A^T @ ∂L/∂y
-%dA = tensor.matmul(%dy, %B) {transpose_rhs = true} : ...
-%dB = tensor.matmul(%A, %dy) {transpose_lhs = true} : ...
+// Backward — stored as region attributes on the forward op
+// ∂L/∂A = ∂L/∂y @ Bᵀ
+// ∂L/∂B = Aᵀ @ ∂L/∂y
+%dA = tensor.matmul(%dy, %B) {transpose_rhs = true}
+%dB = tensor.matmul(%A,  %dy) {transpose_lhs = true}
 ```
 
-This dual representation enables:
-- Gradient checkpointing (recompute forward during backward to save memory)
-- Gradient fusion (fuse forward + backward when profitable)
-- Correct memory accounting for training vs inference
+The dual representation enables:
+- Gradient checkpointing (recompute forward during backward)
+- Gradient fusion (fuse forward+backward when profitable)
+- Correct memory accounting for training vs inference modes
 
-### 2.5 LIFT-QUANTUM: The Quantum Dialect
+### 4.5 Memory Management for Giant Models
 
-LIFT-QUANTUM extends LIFT-CORE with quantum computation primitives. The key design choices:
+LIFT supports three strategies for models too large to fit in GPU memory:
 
-**Qubit Linearity**
+**Gradient checkpointing:** LIFT inserts checkpoint boundaries at profitable intervals (determined by memory/compute tradeoff analysis). Activations before the boundary are discarded and recomputed during the backward pass.
 
-Qubits satisfy the quantum no-cloning theorem. In LIFT-QUANTUM, qubit values are **linear types**: a qubit value can only be used exactly once. The type checker enforces this.
+**Gradient accumulation:** For models where even checkpointing is insufficient, LIFT partitions the batch and accumulates gradients. The pass inserts explicit `tensor.grad_accumulate` operations.
 
-```
-// ERROR: qubit used twice
-%q0 = quantum.init() : qubit
-%q1 = quantum.x(%q0) : qubit    // consumes %q0
-%q2 = quantum.h(%q0) : qubit    // ERROR: %q0 already consumed
-
-// CORRECT: SSA chain
-%q0 = quantum.init() : qubit
-%q1 = quantum.x(%q0) : qubit    // %q0 → %q1
-%q2 = quantum.h(%q1) : qubit    // %q1 → %q2
-%b0 = quantum.measure(%q2) : bit // %q2 → %b0 (qubit consumed, bit produced)
-```
-
-This linearity is not just a type system nicety — it reflects a **physical truth**: quantum information cannot be duplicated. The type checker makes this physical law a compile-time guarantee.
-
-**Noise as a First-Class Type Attribute**
-
-In LIFT-QUANTUM, every gate operation carries optional noise metadata:
+**CPU/SSD offloading:** For 10T+ parameter models, LIFT can emit `tensor.offload` operations that move weights and optimiser state to CPU RAM or NVMe SSD, prefetching them ahead of use.
 
 ```
-%q1 = quantum.cx(%q0, %q_target) {
-    gate_fidelity = 0.995,
-    coherent_error = false,
-    depolarizing_prob = 0.005,
-    crosstalk_pairs = [[1, 2], [2, 3]]
-} : (qubit, qubit) → (qubit, qubit)
+%w = "tensor.offload"(%w_gpu) {
+    location  = "cpu",
+    prefetch  = true,
+    lookahead = 2     // prefetch 2 steps ahead
+} : (tensor<...xf32>) -> tensor<...xf32>
 ```
 
-This noise metadata is:
-- **Used by the simulator** to produce realistic output distributions
-- **Used by the optimiser** to route computation away from noisy qubits
-- **Used by the predictor** to estimate circuit fidelity before QPU submission
-- **Used by error mitigation passes** to select the right mitigation strategy
+The compiler selects the strategy automatically based on the memory budget in `.lith`.
 
-**Physical Qubit Representation**
+**Scale targets:**
 
-LIFT-QUANTUM has two qubit types: logical (abstract) and physical (hardware-bound):
-
-```
-qubit                             // logical qubit: abstract, no hardware assumptions
-physical_qubit<id=5, T1=150µs,   // physical qubit: bound to a specific hardware qubit
-               T2=100µs,          // with measured coherence properties
-               freq=5.1GHz>
-```
-
-The layout mapping pass converts logical qubits to physical qubits, inserting SWAP gates as needed. After mapping, the IR carries full hardware fidelity information.
-
-**Hamiltonian Representation**
-
-For variational algorithms (VQE, QAOA, quantum chemistry), LIFT-QUANTUM supports Hamiltonian types:
-
-```
-hamiltonian {
-    terms = [
-        {coeff = -1.0531, paulis = [(0, X), (1, X)]},
-        {coeff = +0.3979, paulis = [(0, Z), (1, Z)]},
-        {coeff = +0.3979, paulis = [(0, I), (1, Z)]}
-    ]
-}
-```
-
-This representation enables:
-- Automatic Trotterisation for time evolution
-- Pauli grouping for simultaneous measurement
-- Sparse Hamiltonian simulation
-
-### 2.6 LIFT-HYBRID: The Fusion Dialect
-
-LIFT-HYBRID is the glue that makes AI+Quantum computation natural.
-
-**Encoding Operations**
-
-The fundamental challenge in quantum ML is getting classical data into quantum form. LIFT-HYBRID provides explicit, semantically typed encoding operations:
-
-```
-// Amplitude encoding: N classical values → log₂(N) qubits
-// State: Σᵢ xᵢ/‖x‖ |i⟩
-%qubits = hybrid.amplitude_encode(%features) {normalize = true}
-    : (tensor<4xf32>) → (qubit, qubit)   // 4 features → 2 qubits (log₂4=2)
-
-// Angle encoding: N classical values → N qubits, each rotated by xᵢ
-// State: ⊗ᵢ cos(xᵢ/2)|0⟩ + sin(xᵢ/2)|1⟩
-%qubits = hybrid.angle_encode(%features) {gate = RY}
-    : (tensor<4xf32>) → (qubit, qubit, qubit, qubit)   // 4 features → 4 qubits
-```
-
-**Joint Gradient Computation**
-
-The parameter shift rule enables gradient computation through quantum circuits:
-
-```
-// For a parameterised gate: d⟨O⟩/dθ = [⟨O⟩(θ+π/2) - ⟨O⟩(θ-π/2)] / 2
-%gradient = hybrid.parameter_shift_gradient(%circuit, %params, %observable)
-    : (function, tensor<Pxf64>, hamiltonian) → tensor<Pxf64>
-```
-
-LIFT-HYBRID makes this a single operation, allowing the compiler to:
-- Batch forward and backward evaluations efficiently
-- Combine parameter shift with classical auto-diff
-- Optimise the number of QPU evaluations required
+| Scale | Parameters | Strategy |
+|-------|-----------|---------|
+| Small | < 1B | Single GPU, full fit |
+| Medium | 1B–100B | Multi-GPU, tensor + pipeline parallel |
+| Large | 100B–1T | Distributed + checkpointing |
+| Extreme | > 1T | MoE + CPU offload + gradient accumulation |
 
 ---
 
-## Part 3: The Compilation Pipeline
+## Part 5: LIFT-QUANTUM
 
-### 3.1 The Four Phases
-
-Every LIFT programme goes through four phases:
-
-**Phase 1: Simulation (Static)**
-No hardware involved. The programme is analysed statically:
-- Types are checked and inferred
-- Shapes are propagated through the computation graph
-- Resource usage is estimated (FLOPs, memory, gate count, circuit depth)
-- Symbolic execution identifies potential errors (shape mismatches, invalid qubit usage)
-- Energy and carbon footprint are estimated
-
-**Phase 2: Prediction (ML-based)**
-A trained machine learning model (GNN on computation graphs) predicts:
-- Wall-clock latency on the target hardware
-- Memory peak usage
-- GPU/QPU utilisation
-- Quantum circuit fidelity (using the noise model)
-- Whether the budget constraints in `.lith` will be satisfied
-
-If the prediction shows budget violation, the compiler **refuses to proceed** and reports which constraint is violated, why, and how to fix it.
-
-**Phase 3: Optimisation (IR Transformation)**
-The optimisation pass pipeline transforms the IR:
-- Each pass is a function `Module → Module` that preserves semantics
-- Passes are ordered by the `.lith` configuration or auto-selected
-- The optimiser verifies that budget predictions are met after each pass
-- Failed passes (that worsen predictions) are rolled back
-
-**Phase 4: Compilation (Code Generation)**
-The optimised IR is lowered to target-specific code:
-- LIFT-TENSOR → CUDA PTX / LLVM IR / XLA HLO
-- LIFT-QUANTUM → OpenQASM 3 / native gate sets / pulse schedules
-- LIFT-HYBRID → orchestration code (Python runtime + CUDA + OpenQASM)
-
-### 3.2 Pass Infrastructure
-
-Passes in LIFT are strongly typed Rust traits:
+### 5.1 Qubit Types and Linearity
 
 ```rust
-pub trait Pass: Send + Sync {
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
-    fn required_dialects(&self) -> &[&'static str];
-    fn run(&self, module: &mut Module, ctx: &PassContext) -> Result<PassResult>;
-    fn is_applicable(&self, module: &Module, ctx: &PassContext) -> bool;
+pub enum QuantumType {
+    // Abstract logical qubit. Linear type: consumed exactly once.
+    Qubit,
+
+    // Physical qubit with hardware properties.
+    PhysicalQubit {
+        id:        usize,
+        t1_us:     f64,   // relaxation time (microseconds)
+        t2_us:     f64,   // dephasing time (microseconds)
+        freq_ghz:  f64,   // qubit frequency
+        fidelity:  f64,   // average gate fidelity
+    },
+
+    // Classical bit (result of measurement)
+    ClassicalBit,
+
+    // Quantum state (for simulation only, not physical execution)
+    QuantumState {
+        dimension:      usize,
+        representation: StateRepr,
+    },
+
+    // Hamiltonian (for VQE, QAOA)
+    Hamiltonian { num_qubits: usize },
 }
 
-pub struct PassResult {
-    pub changed: bool,
-    pub statistics: PassStatistics,
-    pub budget_impact: BudgetImpact,
+pub enum StateRepr {
+    StateVector,   // 2^n amplitudes — exact, exponential
+    DensityMatrix, // 2^n × 2^n matrix — includes mixed states
+    MPS,           // matrix product state — approximate, polynomial
+    Stabiliser,    // Clifford-only — polynomial, exact
 }
 ```
 
-The `BudgetImpact` field is critical: every pass reports its effect on the performance budget. The pass manager uses this to decide whether to accept or roll back a transformation.
+**Linear type enforcement:** The verifier maintains a `consumed: HashSet<ValueKey>`. When a gate operation consumes a qubit input, it is added to `consumed`. If the same qubit key appears again as an input, the verifier reports a linearity violation. Gate operations produce new qubit values (they do not modify in place), naturally enforcing the SSA + linear property together.
 
-### 3.3 Key AI Passes: Design Notes
+**Branch linearity:** If a conditional branch arm consumes a qubit in the `then` region but not the `else` region, this is a type error. The verifier checks that both arms consume the same set of qubit values.
 
-**TensorFusionPass**
-
-Pattern-matching approach: the pass maintains a library of fusion patterns as graph templates. It uses a modified Ullmann subgraph isomorphism algorithm to find matches, then replaces matched subgraphs with fused operations.
-
-Patterns library (built-in):
-- MatMul + Bias + ReLU → fused_matmul_bias_relu
-- Conv2D + BatchNorm + ReLU → fused_conv_bn_relu
-- LayerNorm (as computed) → fused_layer_norm
-- Attention (QK^T/√d softmax V) → flash_attention (when profitable)
-- RMSNorm (as computed) → fused_rms_norm
-
-**FlashAttentionPass**
-
-Replaces `tensor.attention {implementation=Standard}` with `tensor.attention {implementation=FlashAttention}` when:
-- Sequence length > 512 (below this, standard attention is faster due to overhead)
-- GPU has HBM bandwidth as bottleneck (always true for A100/H100)
-- Causal mask is present (enables causal FlashAttention)
-
-The transformation changes the memory complexity from O(n²) to O(n) — this is a semantic-preserving transformation (same mathematical result, different computation order).
-
-**QuantizationPass**
-
-Selects quantisation scheme based on:
-- `.lith` configuration (INT8, FP8, INT4)
-- Sensitivity analysis (which layers can be quantised without accuracy loss)
-- Hardware support (FP8 requires H100 or A100 with special config)
-- Calibration data (if provided, use static calibration; otherwise dynamic)
-
-The pass inserts explicit `tensor.quantize` and `tensor.dequantize` operations, which are then lowered to hardware-specific implementations.
-
-### 3.4 Key Quantum Passes: Design Notes
-
-**LayoutMappingPass (SABRE)**
-
-The SABRE (SWAP-based BidiREctional heuristic search) algorithm:
-
-1. Create a dependency DAG from the circuit
-2. Build a "front layer" of gates that can execute immediately
-3. For each gate in the front layer:
-   - If the two logical qubits are adjacent in the coupling map: execute directly
-   - If not: score candidate SWAP insertions by their effect on future gates
-4. Insert the best SWAP, update the mapping, repeat
-
-LIFT's implementation of SABRE adds:
-- Noise-aware SABRE: prefers routing through high-fidelity qubit pairs
-- Predictive SABRE: uses the ML model to estimate the effect of each SWAP on circuit fidelity
-
-**GateCancellationPass**
-
-Algebraic identity matching:
-- H · H = I → remove both H gates
-- X · X = I → remove both X gates
-- CX · CX = I (same control/target) → remove both
-- Rz(θ) · Rz(φ) = Rz(θ+φ) → merge into single rotation
-- S · S = Z, T · T = S, S · S · S = S† → simplify S/T chains
-
-The pass uses a commutation table to determine when gates can be freely reordered to expose more cancellation opportunities.
-
-**ErrorMitigationPass**
-
-Selects error mitigation strategy based on:
-- Circuit depth vs T₂ coherence time ratio
-- Gate error rates from the noise model
-- Available shots (ZNE requires ~3× more shots)
-- Required fidelity from the budget
-
-Mitigation strategies implemented:
-- **ZNE (Zero Noise Extrapolation)**: Scale noise up (by gate folding or pulse stretching), extrapolate to zero noise. Effective for shallow circuits.
-- **PEC (Probabilistic Error Cancellation)**: Decompose noisy gates into virtual ideal gates with negative probabilities. Unbiased but high overhead.
-- **Readout error mitigation**: Measure all-zeros and all-ones states to characterise readout, apply linear inversion to correct measurement results.
-- **Dynamical Decoupling**: Insert sequences of X gates during idle periods to suppress T₂ dephasing.
-
----
-
-## Part 4: The .lith Configuration Language
-
-### 4.1 Design Philosophy
-
-The `.lith` language was designed with three goals:
-1. **Replace 8+ config files with one** — every aspect of a LIFT project in a single file
-2. **Self-documenting** — reading a `.lith` file should explain the project to a newcomer
-3. **Type-safe** — configuration errors are caught before any computation starts
-
-### 4.2 Grammar Overview
-
-`.lith` is a superset of TOML with:
-- Nested sections (like TOML tables)
-- First-class arrays of heterogeneous objects
-- Environment variable substitution (`${VAR_NAME}`)
-- File inclusion (`include "./base.lith"`)
-- Conditional blocks (`if hardware.qpu.provider == "ibm" { ... }`)
-- Enum validation (the parser knows the valid values for each field)
-
-### 4.3 Section Reference
-
-**`project`**: Metadata only. Name, version, description, authors, tags, repository URL.
-
-**`dialects`**: Which LIFT dialects the project uses and their versions. Enables forward compatibility checking.
-
-**`compilation`**: Target hardware definition. Separate sub-sections for `gpu`, `qpu`, `cpu`. Each sub-section carries hardware-specific parameters (arch, memory, connectivity).
-
-**`optimization`**: The optimisation pipeline as an ordered list of pass names, plus per-pass configuration objects. The pipeline can be overridden from the CLI.
-
-**`prediction`**: Budget constraints. If predicted metrics violate any budget, compilation fails with a clear error message.
-
-**`simulation`**: How to run the simulator (simulator type, GPU/CPU, number of trajectories for Monte Carlo noise simulation, benchmark scenarios).
-
-**`metrics`**: Which metrics to collect, where to store them, how to visualise them.
-
-**`logging`**: Log level, destinations, structured format, tracing configuration.
-
-**`deployment`**: Container configuration, cloud instance type, edge platform targets.
-
-**`security`**: Sandboxing, encryption, audit logging.
-
----
-
-## Part 5: The Simulation and Prediction Engines
-
-### 5.1 Static Simulation
-
-Static simulation analyses the IR without executing it. It answers questions like:
-- "What are the shapes of all intermediate tensors?"
-- "How many FLOPs does this function perform?"
-- "What is the maximum memory usage at any point?"
-- "How deep is this quantum circuit?"
-- "Are there any shape mismatches that will cause runtime errors?"
-
-These questions are answered through a single forward pass over the IR using abstract interpretation: each operation is evaluated with abstract values (shapes, ranges, symbolic expressions) rather than concrete values.
-
-### 5.2 Quantum Simulation
-
-For quantum programmes, LIFT provides three simulation backends:
-
-**State Vector Simulator**: Maintains the full 2ⁿ-dimensional complex state vector. Exact, but exponential in qubit count. Practical up to ~30 qubits on CPU, ~35 on GPU.
-
-**Density Matrix Simulator**: Maintains the 2ⁿ × 2ⁿ density matrix, enabling simulation of mixed states and noise. Practical up to ~20 qubits. Used for accurate noise simulation.
-
-**MPS (Matrix Product State) Simulator**: Represents the state as a tensor network with bounded bond dimension. Approximate but scales to 50-100 qubits for circuits with limited entanglement.
-
-The simulator is selected automatically based on circuit size and noise requirements.
-
-### 5.3 ML Performance Prediction
-
-The prediction engine uses a **Graph Neural Network (GNN)** trained on a large dataset of (IR, hardware, performance) triples collected from real executions.
-
-**Input to GNN:**
-- Computation graph (operations as nodes, data dependencies as edges)
-- Node features: operation type, tensor shapes, dtype, implementation variant
-- Edge features: tensor sizes, number of bytes transferred
-- Hardware features: memory bandwidth, compute throughput, topology
-
-**Output:**
-- Latency distribution (mean + variance)
-- Memory peak
-- Hardware utilisation
-- For quantum: fidelity prediction using noise-aware graph convolution
-
-**Training:**
-The model is continuously retrained as new hardware and new optimisations are added. Users can contribute their execution traces to improve predictions.
-
----
-
-## Part 6: The Energy and Reliability Models
-
-### 6.1 Energy Modelling
-
-Every operation in LIFT has an associated energy model:
+### 5.2 Gate Operations with Noise Attributes
 
 ```
-AI Energy:
-  matmul(M, N, K) in FP16: energy_joules = M × N × K × 0.35e-12  (picojoules per FLOP)
-  memory_read(bytes): energy_joules = bytes × 0.2 / 1e9          (joules per GB)
-  memory_write(bytes): energy_joules = bytes × 0.4 / 1e9
-
-Quantum Energy:
-  single_qubit_gate: energy_joules = 100e-12  (picojoules)
-  two_qubit_gate: energy_joules = 500e-12
-  measurement: energy_joules = 1000e-12
-  cryogenic_overhead: energy_joules_per_circuit = base_power / measurement_rate
+quantum.h   {fidelity=0.9997}  (%q0: qubit) -> qubit
+quantum.x   {fidelity=0.9998}  (%q1: qubit) -> qubit
+quantum.cx  {fidelity=0.9950, crosstalk=[(2,0.001)]}
+            (%q0: qubit, %q1: qubit) -> (qubit, qubit)
+quantum.rz  {fidelity=0.9999}  (%q0: qubit, %theta: f64) -> qubit
+quantum.measure                 (%q0: qubit) -> bit
+quantum.reset                   (%q0: qubit) -> qubit  // recycles qubit
+quantum.barrier                 (%q0: qubit, %q1: qubit) // no-optimise fence
 ```
 
-Total programme energy is summed across all operations. The carbon footprint is computed as:
+**Noise propagation:** The static analyser computes the accumulated error through a circuit using the noise model. For a circuit of depth D with average gate error p per layer, the estimated fidelity is approximately (1-p)^D. The full analysis uses a Pauli error propagation model.
+
+### 5.3 Noise Composition After Fusion
+
+When two consecutive gates are fused into one operation, the noise model of the fused operation must be derived. LIFT uses a **two-step approach**:
+
+**Step 1 (initial implementation):** Depolarising approximation. If gate G1 has error p1 and gate G2 has error p2, the fused gate has error p_fused ≈ p1 + p2 - p1·p2 (series composition of independent channels).
+
+**Step 2 (v1.1):** Full Kraus operator composition. The composite channel is computed as the product of Kraus operators. This is more accurate but requires matrix operations at compile time.
+
+### 5.4 Layout Mapping: SABRE
+
+The SABRE (SWAP-based Bidirectional heuristic search) algorithm maps logical qubits to physical qubits on a constrained coupling map.
+
+**Noise-aware SABRE:** The standard SABRE scores SWAP candidates by their effect on future gate depths. LIFT's noise-aware variant additionally weights by the fidelity of the qubit pairs involved:
 
 ```
-carbon_gCO2 = total_energy_kWh × grid_intensity_gCO2_per_kWh
+score(swap(q1, q2)) = depth_improvement(swap) 
+                    × fidelity(q1, q2)
+                    / (1 + swap_overhead)
 ```
 
-The grid intensity is configurable per region. If the energy budget in `.lith` is violated, compilation fails.
+This biases routing through high-fidelity qubit pairs, at the cost of slightly longer paths.
 
-### 6.2 Reliability Modelling
+**SWAP insertion verification:** After layout mapping, the verifier checks that the mapped circuit is semantically equivalent to the original by simulating both on a small test input and comparing measurement distributions within a tolerance of 1e-5.
 
-LIFT models hardware failures at the IR level:
+### 5.5 Error Mitigation Passes
 
-**For GPU:**
-- Soft errors (single-bit memory corruption): ~10⁻⁶ per hour, handled by ECC
-- Hard errors (permanent failure): ~0.01 per GPU per year, handled by checkpointing
+**ZNE (Zero Noise Extrapolation):** The pass triplicates each gate (G → G G† G for 3× noise factor) and also runs the original circuit (1× factor). It then extrapolates the expected value observable to zero noise using Richardson extrapolation. Order is selected automatically: for circuits of depth < 20, linear extrapolation; for depth 20–100, quadratic; above 100, Richardson order 3.
 
-**For QPU:**
-- Qubit decoherence: modelled as exponential decay with T₁ and T₂ times
-- Gate errors: modelled as depolarising channels with measured error probabilities
-- Calibration drift: modelled as time-varying gate frequencies
+**Readout error mitigation:** The pass inserts calibration circuits that prepare all-zeros and all-ones states and measure them. The resulting error matrix M (where M[i,j] = P(measure i | prepared j)) is inverted and applied to all measurement results.
 
-The reliability model is used to:
-- Automatically insert checkpointing at profitable intervals
-- Recommend error correction codes for circuits that exceed decoherence times
-- Alert when circuit depth approaches the T₂ coherence limit
+**Dynamical Decoupling:** For each idle period of duration t on a qubit, if t > T2/10, the pass inserts an XY-4 sequence (X, Y, X, Y with appropriate delays) to suppress dephasing. Hardware timing constraints are respected by querying the device calibration.
 
 ---
 
-## Part 7: Comparison with Existing Systems
+## Part 6: LIFT-HYBRID
 
-### 7.1 vs MLIR
+### 6.1 Data Encoding
 
-MLIR is the most direct comparison. LIFT's relationship with MLIR:
+The fundamental challenge: getting classical data into quantum form. LIFT-HYBRID provides typed encoding operations with explicit semantics:
 
-**MLIR strengths that LIFT adopts:**
-- SSA form as foundation
-- Dialect extensibility
-- Pass infrastructure
-- Region/Block/Operation hierarchy
+```
+// Amplitude encoding: N floats → log₂(N) qubits
+// |ψ⟩ = Σᵢ xᵢ/‖x‖ |i⟩
+hybrid.amplitude_encode (%x: tensor<N×f32>) {normalize=true} 
+    -> (qubit × log₂N)
 
-**What LIFT adds beyond MLIR:**
-- Native quantum dialect (MLIR has no quantum support)
-- Noise-aware IR (no IR has this)
-- Semantic AI types (AttentionTensor, KVCache — MLIR has generic tensors)
-- Energy budgets as first-class concept
-- .lith configuration language (MLIR requires C++ for everything)
-- Prediction engine integrated with the compiler
-- Hybrid AI+QC composition (not possible in MLIR today)
+// Angle encoding: N floats → N qubits, each rotated by xᵢ
+// |ψ⟩ = ⊗ᵢ cos(xᵢ/2)|0⟩ + sin(xᵢ/2)|1⟩
+hybrid.angle_encode (%x: tensor<N×f32>) {gate=RY} 
+    -> (qubit × N)
 
-**LIFT is not a replacement for MLIR.** LIFT's CUDA backend can lower to MLIR/LLVM for the final native code generation step.
+// Basis encoding: integer → computational basis state |x⟩
+hybrid.basis_encode (%x: tensor<N×i32>) 
+    -> (qubit × N)
+```
 
-### 7.2 vs OpenQASM 3
+### 6.2 Joint Gradient Computation
 
-OpenQASM 3 is a good quantum gate description language. But:
-- It has no types beyond qubits, bits, and scalars
-- It has no noise modelling in the language itself
-- It has no connection to AI computation
-- It has no optimisation framework
-- It has no prediction capability
+The parameter shift rule enables gradients through quantum circuits:
 
-LIFT uses OpenQASM 3 as an *output format* (backend), not as an IR.
+```
+d⟨O⟩/dθ = [⟨O⟩(θ+π/2) - ⟨O⟩(θ-π/2)] / 2
+```
 
-### 7.3 vs PennyLane
+LIFT-HYBRID expresses this as a single operation:
 
-PennyLane is the closest existing tool to LIFT-HYBRID. It supports:
-- Quantum circuits with differentiable parameters
-- Gradient computation via parameter shift
-- Multiple hardware backends
-- Some AI+QC integration
+```
+hybrid.parameter_shift_gradient
+    (%circuit: function,
+     %params:  tensor<P×f64>,
+     %obs:     hamiltonian)
+    -> tensor<P×f64>
+```
 
-What LIFT adds beyond PennyLane:
-- Compilation and optimisation (PennyLane is a runtime, not a compiler)
-- Static analysis and simulation before execution
-- Noise-aware compilation (not just execution)
-- Energy budgets
-- Unified representation for both AI and quantum in one IR
-- Hardware-agnostic IR (PennyLane is tied to specific device APIs)
-
-### 7.4 vs Qiskit
-
-Qiskit provides excellent quantum compilation tools for IBM hardware. But:
-- IBM-specific (limited portability to other QPU vendors)
-- No AI integration
-- No unified configuration language
-- No ML-based prediction
-- No energy modelling
-- Compilation is Python-based (slower, harder to optimise)
-
-LIFT uses Qiskit Runtime as one of its *backends* for submitting to IBM hardware.
+The compiler lowers this into 2P circuit evaluations (plus and minus shifts for each of the P parameters), batches them for efficiency, and combines the results. The gradient can then be passed directly into a classical `tensor.adam_update` operation for joint optimisation.
 
 ---
 
-## Part 8: Implementation Notes
+## Part 7: The Compilation Pipeline
 
-### 8.1 Why Rust?
+### 7.1 Simulation Phase
 
-Rust was chosen for the following reasons:
+Static simulation answers without running hardware:
 
-1. **Memory safety without garbage collection**: A compiler must handle large IRs without GC pauses. Rust's ownership system provides safety guarantees without runtime cost.
+1. **Type inference:** Fill in any missing types from context.
+2. **Shape propagation:** Forward pass computing output shapes for every operation.
+3. **FLOP counting:** Per-operation FLOP formulae. Attention is O(n²·d), MatMul is O(m·n·k), etc.
+4. **Memory liveness:** Track allocation and deallocation of all tensors. Compute peak memory.
+5. **Bandwidth pressure:** Sum of (tensor_size × access_count) per operation.
+6. **Noise accumulation (quantum):** Propagate Pauli error through circuit. Estimate final fidelity.
+7. **Energy model:** Sum energy per operation × count, add infrastructure overhead.
+8. **Carbon estimate:** energy_kWh × grid_intensity_gCO2_per_kWh.
 
-2. **Performance**: IR passes over large models (1T+ parameter models) require efficient data structures and cache-friendly traversals. Rust gives C-level performance.
+**Energy model detail:**
 
-3. **Algebraic type system**: Rust's enums and pattern matching map naturally to IR hierarchies (Operation variants, Type variants, Pass variants).
+| Operation | Energy per unit |
+|-----------|----------------|
+| FP16 MatMul | 0.35 pJ/FLOP (H100) |
+| INT8 MatMul | 0.12 pJ/FLOP |
+| Memory read | 0.2 J/GB (HBM3) |
+| Single-qubit gate | ~100 pJ |
+| Two-qubit gate | ~500 pJ |
+| Measurement | ~1000 pJ |
+| Cryogenic base load | ~5000 W (dilution refrigerator) |
 
-4. **FFI**: Rust's C FFI is straightforward, enabling Python bindings via PyO3/Maturin, and C bindings for integration with existing C/C++ compiler infrastructure.
+### 7.2 Prediction Phase
 
-5. **Ecosystem**: The Rust ecosystem has excellent libraries for the components LIFT needs: `petgraph` (graph algorithms), `salsa` (incremental computation), `rayon` (parallel passes), `lalrpop` (parser generation).
+**GNN Architecture:**
 
-### 8.2 Data Structure Design
+```
+Input graph:
+  Nodes: (op_type_onehot, tensor_shapes_log, dtype_onehot, impl_variant)
+  Edges: (tensor_size_log, direction_flag)
 
-The IR is stored as a **generational arena**: all Values, Operations, Blocks, and Regions are stored in a flat arena indexed by generational IDs. This provides:
-- O(1) lookup by ID
-- Cache-friendly traversal
-- Safe ID invalidation when operations are deleted
-- No pointer chasing through linked lists
+Model:
+  NodeEncoder:  Linear(node_feat_dim → 128)
+  EdgeEncoder:  Linear(edge_feat_dim → 64)
+  MessagePass:  6 × GatedGraphConv(128, 128)
+  GlobalPool:   GlobalAttentionPooling(128 → 128)
+  HWEncoder:    Linear(hw_feat_dim → 64)
+  LatencyHead:  MLP(192 → 64 → 1)   [predicts log(latency_ms)]
+  MemoryHead:   MLP(192 → 64 → 1)   [predicts log(memory_gb)]
+  FidelityHead: MLP(192 → 64 → 1)   [quantum circuits only]
+
+Training: 100K+ (IR graph, hw_spec, measured_latency) triples
+Fallback: analytical roofline model when confidence < 0.7
+```
+
+**Budget enforcement:**
+
+If any predicted metric violates the corresponding budget in `.lith`, compilation fails:
+
+```
+ERROR: Budget violation
+  Predicted latency: 147.3ms (±12ms, 95% CI)
+  Budget:            100ms
+  Violation:         47ms over budget
+
+  Suggested actions (estimated gains):
+    1. Enable flash-attention pass:     -62ms → 85ms  ✓ would satisfy
+    2. Reduce sequence length 2048→512: -80ms → 67ms  ✓ would satisfy
+    3. Enable INT8 quantisation:        -44ms → 103ms ✗ still over
+```
+
+### 7.3 Optimisation Phase
+
+The pass manager uses **budget-aware rollback**: if a pass degrades the predicted budget metrics, it is rolled back automatically.
 
 ```rust
-pub struct Context {
-    values: Arena<ValueData>,
-    ops: Arena<OperationData>,
-    blocks: Arena<BlockData>,
-    regions: Arena<RegionData>,
-    types: TypeInterner,   // deduplicated type storage
-    strings: StringInterner, // deduplicated string storage
-}
-```
-
-All handles (Value, Operation, Block, Region) are opaque ID types. The Context is the single source of truth.
-
-### 8.3 Pass Manager Design
-
-The pass manager uses a **declarative dependency specification**: each pass declares what it requires (analysis results) and what it invalidates. The pass manager schedules analyses lazily and caches results across passes.
-
-```rust
-pub struct PassManager {
-    passes: Vec<(Box<dyn Pass>, PassConfig)>,
-    analysis_cache: AnalysisCache,
-    budget: Budget,
-    predictor: Arc<dyn Predictor>,
-}
-
 impl PassManager {
-    pub fn run(&mut self, module: &mut Module) -> Result<PassManagerReport> {
-        for (pass, config) in &self.passes {
-            if !pass.is_applicable(module, &self.analysis_cache) {
-                continue;
+    fn run_pass(&mut self, pass: &dyn Pass, module: &mut Module) -> PassResult {
+        let snapshot   = module.snapshot();
+        let pred_before = self.predictor.predict(module);
+
+        let result = pass.run(module, &mut self.analysis_cache);
+
+        if result.changed {
+            let pred_after = self.predictor.predict(module);
+
+            // If this pass made a budget violation WORSE, roll back
+            if self.budget.violation_worsened(&pred_before, &pred_after) {
+                module.restore(snapshot);
+                return PassResult::rolled_back();
             }
 
-            // Snapshot for rollback
-            let snapshot = module.snapshot();
-            let prediction_before = self.predictor.predict(module)?;
-
-            // Run pass
-            let result = pass.run(module, &mut self.analysis_cache)?;
-
-            if result.changed {
-                // Predict again after transformation
-                let prediction_after = self.predictor.predict(module)?;
-
-                // Check if transformation improved things
-                if self.budget.is_violated(&prediction_after)
-                   && !self.budget.is_violated(&prediction_before) {
-                    // Rollback: this transformation made things worse
-                    module.restore(snapshot);
-                    continue;
-                }
-
-                // Invalidate stale analyses
-                self.analysis_cache.invalidate(pass.invalidates());
-            }
+            self.analysis_cache.invalidate(pass.invalidates());
         }
-        Ok(PassManagerReport { ... })
+
+        result
     }
 }
 ```
 
+**Pass ordering:** Passes are ordered in `.lith`. We recommend:
+1. Canonicalise and constant-fold first (simplify the IR before expensive analyses)
+2. Fusion passes second (reduce memory bandwidth)
+3. Quantisation third (changes types, so must come before layout-sensitive passes)
+4. Quantum passes fourth (gate cancellation, then layout)
+5. Error mitigation last (adds overhead, do not cancel it with gate cancellation)
+6. Hybrid passes at the end (depend on both AI and quantum passes being done)
+
+### 7.4 Code Generation
+
+**CUDA backend:** Generates PTX assembly. For tensor operations, uses cuBLAS for MatMul, custom FlashAttention kernels for attention, and cuDNN for convolution. The backend emits kernel launch configurations (block size, grid size, shared memory) derived from the hardware spec in `.lith`.
+
+**OpenQASM 3 backend:** Emits standard OpenQASM 3.0. Gate decompositions are hardware-specific: IBM uses `{RZ, SX, X, CX}` basis, Rigetti uses `{RZ, RX, CZ}` basis. The backend queries the device coupling map to emit only native two-qubit gates between physically connected pairs.
+
+**LLVM backend:** For CPU targets. Uses LLVM 17+ IR. The backend annotates with SIMD target features (AVX-512) and emits OpenMP parallel regions for multi-core tensor operations.
+
 ---
 
-## Part 9: Long-Term Vision
+## Part 8: Semantic Correctness
 
-### 9.1 The 5-Year Horizon
+**This is the most important section for academic credibility.**
+
+### 8.1 What "Semantics-Preserving" Means
+
+A transformation T is semantics-preserving if for all inputs I:
 
 ```
-2025: LIFT v1.0
-  • Full twin dialect implementation
-  • CUDA + OpenQASM backends
-  • PyTorch + Qiskit importers
-  • ML prediction engine
-  • .lith language
-  • 10 research groups using it
-
-2026: LIFT v2.0
-  • Multi-chip GPU (NVLink clusters) support
-  • Photonic quantum computing backend
-  • Neutral atom QPU backend
-  • Auto-tuning via reinforcement learning
-  • 50 research groups, first industrial users
-
-2027: LIFT v3.0
-  • Real-time adaptive compilation (runtime feedback)
-  • Hardware digital twins (simulate chips not yet fabricated)
-  • Standardisation effort (propose to ISO/IEC JTC1 or similar)
-  • Integration into major cloud platforms (AWS Braket, IBM Quantum)
-  • 500+ users, de facto standard for hybrid AI+QC
-
-2029: LIFT as infrastructure
-  • The same role LLVM plays for classical computing
-  • Every major AI framework targets LIFT as intermediate representation
-  • Every major QPU vendor supports LIFT as input format
-  • The IR that defines the hybrid computing era
+  execute(original_IR, I) ≈ execute(T(IR), I)
 ```
 
-### 9.2 The Standard-Setting Ambition
+where ≈ means: same output values within floating-point tolerance (for AI) or same probability distribution within statistical tolerance (for quantum).
 
-LLVM became indispensable not by being the best in any one dimension, but by being the right abstraction at the right level — high enough to reason about programs, low enough to generate efficient code, and open enough that everyone contributed to it.
+### 8.2 Correctness Mechanisms
 
-LIFT's ambition is the same for the AI+Quantum era:
-- High enough to reason about attention mechanisms and quantum circuits
-- Low enough to generate PTX and OpenQASM
-- Open enough that GPU vendors, QPU vendors, AI labs, and researchers all contribute
+**Type system soundness:** Type-preserving transformations cannot introduce type errors. The type system is defined formally as a set of inference rules. We prove (by structural induction on the operation set) that every pass produces a well-typed IR if its input is well-typed.
 
-The twin dialect architecture is the core insight that makes this possible. By recognising the structural isomorphism between AI and quantum computation, LIFT provides a unification that is not arbitrary — it reflects a deep truth about the mathematical structure of computation in both domains.
+**Invariant preservation:** Each pass declares the invariants it preserves and those it may invalidate. The pass manager checks invariants after each pass in debug mode. Current invariants tracked:
+- SSA property (every value defined once)
+- Qubit linearity (every qubit consumed once)
+- Shape consistency (all shapes resolved)
+- Dominance (all uses dominated by definitions)
+
+**Regression testing:** 5,000+ reference programmes. Before releasing any pass, we run all reference programmes through the pass and compare outputs (within tolerance) against a trusted reference implementation (PyTorch for AI, Qiskit StateVector simulator for quantum).
+
+**Formal verification (roadmap):** For the most critical passes (tensor fusion, layout mapping), we plan to add proof-carrying passes: each transformed IR includes a certificate that the verifier can check in O(|IR|) time. This is a v2.0 research goal, not v1.0.
+
+### 8.3 Known Unsound Cases (Documented)
+
+**Quantisation:** INT8 quantisation is inherently lossy. The output of a quantised model will differ numerically from the original. This is by design and is flagged explicitly in the compilation report:
+
+```
+Warning: quantisation pass applied. Outputs will differ from FP32 baseline.
+  Expected accuracy impact: < 0.5% on typical classification tasks.
+  Validate on your task before deploying.
+```
+
+**ZNE extrapolation:** Zero Noise Extrapolation assumes the observable varies smoothly with noise factor. This assumption fails for highly non-linear observables. LIFT flags when the R² of the extrapolation fit is below 0.95.
+
+---
+
+## Part 9: Interoperability
+
+### 9.1 Import/Export Matrix
+
+| Framework | Import → LIFT | Export ← LIFT | Status |
+|-----------|--------------|--------------|--------|
+| PyTorch FX | `torch.fx.Graph` → LIFT-TENSOR | — | 80% done |
+| ONNX | opset 19 → LIFT-TENSOR | LIFT-TENSOR → ONNX opset 19 | 40% done |
+| TensorFlow | `tf.function` → LIFT-TENSOR | — | Planned |
+| Qiskit | `QuantumCircuit` → LIFT-QUANTUM | LIFT-QUANTUM → OpenQASM 3 | Design |
+| Cirq | `Circuit` → LIFT-QUANTUM | OpenQASM 3 | Planned |
+| PennyLane | `QNode` → LIFT-HYBRID | — | Planned |
+| OpenQASM 3 | QASM parser → LIFT-QUANTUM | LIFT-QUANTUM → OpenQASM 3 | 60% done |
+
+### 9.2 Python Bindings (PyO3)
+
+The Python API is the primary user-facing interface for researchers:
+
+```python
+import lift
+
+# Import a PyTorch model
+model = MyModel()
+lift_ir = lift.from_pytorch(model, example_inputs=(torch.zeros(1, 784),))
+
+# Compile
+result = lift.compile(lift_ir, config="project.lith")
+
+# Import a Qiskit circuit
+from qiskit import QuantumCircuit
+qc = QuantumCircuit(4)
+qc.h(0); qc.cx(0, 1)
+lift_ir = lift.from_qiskit(qc)
+
+# Analyse
+report = lift.analyse(lift_ir)
+print(report.circuit_depth, report.gate_count)
+```
+
+**Python bindings from Phase 0:** Python bindings are not an afterthought — they are scaffolded in Phase 0 so that researchers can use LIFT from Python as soon as Phase 1 features are available. The initial bindings expose `analyse`, `verify`, `print`, and basic LLVM compilation.
+
+### 9.3 C API
+
+For integration with C/C++ tools (PyTorch C++ API, TensorFlow C API, custom hardware SDKs):
+
+```c
+// lift.h
+typedef struct LiftContext LiftContext;
+typedef struct LiftModule  LiftModule;
+
+LiftContext* lift_context_new(void);
+void         lift_context_free(LiftContext*);
+
+LiftModule*  lift_parse(LiftContext*, const char* source, size_t len);
+void         lift_module_free(LiftModule*);
+
+int          lift_verify(LiftModule*);       // 0 = ok, 1 = error
+char*        lift_print(LiftModule*);        // caller frees
+char*        lift_analyse_json(LiftModule*); // caller frees
+```
+
+---
+
+## Part 10: Security Model
+
+### 10.1 Threat Model
+
+| Threat | Risk | Mitigation |
+|--------|------|------------|
+| Malicious .lif file causing parser crash | Medium | Sandboxed parsing with memory limits and timeouts |
+| Integer overflow in shape arithmetic | Low | All shape computations use checked arithmetic |
+| Generated CUDA code with buffer overflows | Low | All tensor accesses are bounds-checked in IR; backend enforces bounds |
+| Supply chain compromise | Medium | `cargo audit` weekly, dependency pinning, signed releases |
+| Arbitrary code in .lith config | Low | .lith is data, not code; no `eval` semantics |
+
+### 10.2 Sandboxed Compilation
+
+For untrusted inputs (e.g., a cloud API accepting user-submitted .lif files), the compiler runs in a sandbox:
+
+```toml
+# Sandbox configuration
+[sandbox]
+type           = "seccomp"     # or "docker", "nsjail"
+memory_limit   = "4GB"
+time_limit_s   = 60
+allowed_syscalls = ["read", "write", "mmap", "munmap", "exit"]
+no_network     = true
+```
+
+### 10.3 Generated Code Safety
+
+- All tensor memory accesses in the generated CUDA are bounds-checked in debug mode.
+- All qubit indices in generated OpenQASM are validated against the device qubit count before submission.
+- No `unsafe` code in `lift-core`, `lift-tensor`, `lift-quantum`, or `lift-hybrid`. `unsafe` is allowed only in `lift-export` (CUDA FFI) with explicit safety documentation.
+
+### 10.4 Audit Trail
+
+Every compilation is logged with:
+- SHA256 hash of the input .lif source
+- SHA256 hash of the .lith config
+- Compiler version
+- Predicted and actual performance metrics (if available)
+- Pass pipeline applied and results
+
+---
+
+## Part 11: Cost Model
+
+### 11.1 Compilation Cost
+
+| Task | Hardware | Estimated time |
+|------|---------|---------------|
+| Compile 7B-parameter model | 16-core CPU | 5–10 minutes |
+| Compile 100-qubit circuit | 8-core CPU | 30–60 seconds |
+| GNN prediction query | CPU (ONNX runtime) | < 100ms |
+| Full pass pipeline on 1B model | 16-core CPU | 2–3 minutes |
+
+### 11.2 Predicted Execution Cost
+
+LIFT reports the predicted economic cost of execution:
+
+```
+$ lift predict model.lif --target aws --hardware ibm_kyoto
+──────────────────────────────────────────────────────────
+COST PREDICTION
+  GPU (p4d.24xlarge spot):  $0.47 per 1M tokens
+  QPU (IBM Kyoto):          $12.40 per 1000 shots
+  Total per inference:      $12.87
+
+BUDGET CHECK
+  Budget: $10.00
+  Predicted: $12.87 — OVER by $2.87 (28.7%)
+
+  Suggested: reduce shots 4096→500
+    New cost: $8.20 (fidelity drops 99.1%→91.8%)
+──────────────────────────────────────────────────────────
+```
+
+### 11.3 Carbon Footprint
+
+```
+CARBON ESTIMATE
+  Compute: 0.003 kWh × 350 gCO₂/kWh = 1.05 gCO₂ (us-east-1)
+  Cryogenic overhead (QPU): 0.012 kWh × 350 = 4.20 gCO₂
+  Total per inference: 5.25 gCO₂
+
+  Equivalent: 0.013 km car driving
+  To stay under 1 gCO₂ per inference:
+    → Use us-west-1 (150 gCO₂/kWh): 2.25 gCO₂ per inference
+    → Reduce QPU shots to 100: 1.05 gCO₂ per inference
+```
+
+---
+
+## Part 12: Scalability
+
+### 12.1 Compiler Scalability
+
+For very large models (1T+ parameters), the compiler itself must scale:
+
+**Incremental compilation:** Only recompile layers that changed. Unchanged layers are retrieved from the compilation cache (keyed by layer content hash). For a 1T parameter model with 128 layers, modifying one layer requires recompiling 1/128 of the model.
+
+**Distributed compilation:** The pass pipeline can be parallelised using `rayon`. Independent passes (those with no data dependency) run in parallel across CPU cores. For a 32-core machine, compilation of a large model is roughly 8–12× faster than single-threaded.
+
+**Lazy analysis:** Analyses are computed on demand and cached. If a pass does not need shape information, shapes are not propagated.
+
+### 12.2 Distributed Execution
+
+For models that must run across multiple GPUs or multiple QPUs:
+
+```lith
+compilation {
+    target {
+        type = "distributed"
+
+        classical {
+            nodes         = 16
+            gpu_per_node  = 8
+            strategy {
+                tensor_parallel   = 8
+                pipeline_stages   = 4
+                data_parallel     = 4
+            }
+        }
+    }
+}
+```
+
+LIFT inserts explicit `tensor.parallel_split`, `tensor.parallel_allreduce`, and `tensor.pipeline_send`/`receive` operations in the IR for distributed execution, making the communication pattern explicit and optimisable.
+
+---
+
+## Part 13: Testing Strategy
+
+### 13.1 Unit Tests (per crate)
+
+Each operation: type checking, shape inference, FLOP counting, printer, parser round-trip.
+Each pass: at least 15 test cases (apply, do not apply, edge cases, rejects incorrectly).
+Target: 80% code coverage on all crates.
+
+### 13.2 Integration Tests
+
+End-to-end: .lif source → parse → verify → passes → backend → compare against reference.
+Cross-dialect: tensor + quantum + hybrid in the same file.
+Regression: 5,000+ programmes that must compile and produce correct results.
+
+### 13.3 Quantum Tests
+
+Compare LIFT simulator output against Qiskit StateVector simulator.
+Tolerance: 1e-5 for noiseless circuits, 1e-2 for noisy circuits.
+Weekly run on real QPU to detect calibration drift.
+
+### 13.4 Performance Tests
+
+Compilation time: no pass is allowed to increase compilation time by more than 10%.
+Generated code quality: no pass is allowed to decrease execution performance by more than 5%.
+Memory: peak compiler memory < 2GB for 7B-parameter models.
+
+---
+
+## Part 14: Maintenance Plan
+
+### 14.1 Release Cadence
+
+| Release type | Frequency | Supported for |
+|-------------|-----------|--------------|
+| Nightly | Daily | Not supported |
+| Alpha | Weekly | 2 weeks |
+| Beta | Monthly | 3 months |
+| Stable | Quarterly | 18 months |
+| LTS | Every 2 years | 3 years |
+
+### 14.2 Deprecation Policy
+
+1. Announce deprecation in release notes with migration guide.
+2. Emit compiler warning when deprecated feature is used.
+3. Remove after one full stable release cycle (minimum 3 months notice).
+
+### 14.3 Security Policy
+
+- Security contact: security@lift-framework.org
+- 90-day coordinated disclosure.
+- All releases signed with GPG.
+- `cargo audit` runs on every CI build.
 
 ---
 
 ## Conclusion
 
-LIFT is not a framework that improves on existing tools by 10% or 20%. It is a framework that makes **previously impossible things possible**: hybrid AI+Quantum programmes that compile, optimise, and execute on heterogeneous hardware from a single unified representation.
+LIFT's design is guided by correctness, honesty, and incremental adoption. The twin dialect architecture is not an aesthetic choice — it is a recognition that the same class of problems appears in AI and quantum compilation, and that solving them once in a unified IR is better than solving them twice in separate tools.
 
-The timing is right. The technology is ready. The problem is real and growing.
+The open design problems (linear types in branches, noise composition after fusion, GNN predictor generalisation) are documented honestly. They are solvable; they are not blockers for Phase 1. They will be addressed in sequence as the implementation matures.
 
-The question is not whether a unified IR for AI+Quantum will exist. It is whether LIFT will be the one that defines the standard.
+The architecture is ready. The foundations are correct. The implementation begins.
 
 ---
 
-*This document is a living specification. It will be updated as implementation progresses.*
-
-*LIFT — Where Artificial Intelligence Meets Quantum Reality.*

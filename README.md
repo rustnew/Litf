@@ -1,476 +1,519 @@
-# LIFT — Language for Intelligent Frameworks and Technologies
+<!--
+  LIFT — Language for Intelligent Frameworks and Technologies
+  README v2.0  |  Phoenix Edition  |  Corrected & Honest
+-->
 
-> **The world's first unified Intermediate Representation for AI and Quantum Computing.**
-> Compile once. Optimise everywhere. Simulate anything.
+<div align="center">
+
+```
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+    ░░                                                ░░
+    ░░   ██╗     ██╗███████╗████████╗                ░░
+    ░░   ██║     ██║██╔════╝╚══██╔══╝                ░░
+    ░░   ██║     ██║█████╗     ██║                   ░░
+    ░░   ██║     ██║██╔══╝     ██║                   ░░
+    ░░   ███████╗██║██║        ██║                   ░░
+    ░░   ╚══════╝╚═╝╚═╝        ╚═╝                   ░░
+    ░░                                                ░░
+    ░░   Language for Intelligent Frameworks          ░░
+    ░░   and Technologies                             ░░
+    ░░                                                ░░
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+```
+
+# LIFT
+
+**The first Intermediate Representation designed for both AI and Quantum Computing.**
+
+*Simulate before you run. Compile once. Optimise everywhere.*
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
+[![Rust 1.78+](https://img.shields.io/badge/Rust-1.78+-orange.svg)](https://rustlang.org)
+[![Phase 0-1 Active](https://img.shields.io/badge/Phase-0--1%20Active-red.svg)]()
+[![Research Alpha](https://img.shields.io/badge/Status-Research%20Alpha-gold.svg)]()
+
+</div>
 
 ---
 
-```
-╔══════════════════════════════════════════════════════════════════════════════════╗
-║                                                                                  ║
-║    ██╗     ██╗███████╗████████╗                                                  ║
-║    ██║     ██║██╔════╝╚══██╔══╝                                                  ║
-║    ██║     ██║█████╗     ██║                                                     ║
-║    ██║     ██║██╔══╝     ██║                                                     ║
-║    ███████╗██║██║        ██║                                                     ║
-║    ╚══════╝╚═╝╚═╝        ╚═╝                                                     ║
-║                                                                                  ║
-║    Language for Intelligent Frameworks and Technologies                          ║
-║    ─────────────────────────────────────────────────                             ║
-║    AI  ·  Quantum  ·  Hybrid  ·  Unified IR                                     ║
-║                                                                                  ║
-╚══════════════════════════════════════════════════════════════════════════════════╝
-```
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Language-Rust-orange.svg)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/Status-Research%20%2F%20Alpha-purple.svg)]()
-[![IR](https://img.shields.io/badge/IR-Twin%20Dialects-green.svg)]()
+> **HONEST STATUS — Please read before proceeding**
+>
+> This document describes the **complete vision and architecture** for LIFT.
+> **Phase 0 (LIFT-CORE) is complete. Phase 1 (LIFT-TENSOR) is active.**
+> Quantum and hybrid support are in design, not yet coded.
+>
+> We publish the full vision early because the architectural decisions must be
+> made correctly from day one. See Section 9 for what works today.
+> Do not use in production. Contributions are very welcome.
 
 ---
 
 ## Table of Contents
 
-1. [The Vision](#1-the-vision)
-2. [Why LIFT Exists — The Problem](#2-why-lift-exists--the-problem)
-3. [How LIFT Is Better Than Existing IRs](#3-how-lift-is-better-than-existing-irs)
-4. [Core Concept: Twin Dialects Architecture](#4-core-concept-twin-dialects-architecture)
-5. [What LIFT Achieves](#5-what-lift-achieves)
-6. [Architecture Deep Dive](#6-architecture-deep-dive)
-7. [The Four Pillars: Simulate · Compile · Optimise · Predict](#7-the-four-pillars)
-8. [Implementation Plan](#8-implementation-plan)
-9. [Getting Started](#9-getting-started)
-10. [Roadmap](#10-roadmap)
-11. [Why LIFT Will Win](#11-why-lift-will-win)
+1. [The Problem](#1-the-problem)
+2. [The Vision](#2-the-vision)
+3. [Honest Comparison with Existing IRs](#3-honest-comparison)
+4. [Core Concept: Twin Dialects](#4-twin-dialects)
+5. [Architecture](#5-architecture)
+6. [The Four Pillars](#6-the-four-pillars)
+7. [The .lif Source Language](#7-the-lif-language)
+8. [The .lith Configuration Language](#8-the-lith-configuration)
+9. [Current Status](#9-current-status)
+10. [Getting Started](#10-getting-started)
+11. [Roadmap](#11-roadmap)
+12. [Contributing](#12-contributing)
+13. [Known Limitations](#13-known-limitations)
+14. [Why This Matters](#14-why-this-matters)
 
 ---
 
-## 1. The Vision
+## 1. The Problem
 
-### The Problem of Our Era
+### The Toolchain Fragmentation Crisis
 
-The computing world is splitting in two — and no one has built the bridge yet.
-
-```
-  CLASSICAL COMPUTING                    QUANTUM COMPUTING
-  ─────────────────                      ─────────────────
-
-  PyTorch / TensorFlow                   Qiskit / Cirq / PennyLane
-       ↓                                        ↓
-   MLIR / ONNX / XLA                      OpenQASM / QASM3
-       ↓                                        ↓
-   LLVM / CUDA PTX                        QPU Pulse Schedules
-       ↓                                        ↓
-  GPU / TPU / CPU                         IBM Q / Rigetti / IonQ
-
-  ✗ No shared IR                         ✗ No shared IR
-  ✗ No joint optimisation                ✗ Cannot talk to AI
-  ✗ No hybrid path                       ✗ No hybrid path
-```
-
-**LIFT is the bridge.**
+A researcher working on hybrid AI+Quantum today must manage eight incompatible tools:
 
 ```
-  ╔═══════════════════════════════════════════════════════════════╗
-  ║                      YOUR CODE                                ║
-  ║           (Described in .lif or .lith files)                  ║
-  ╠═══════════════════════════════════════════════════════════════╣
-  ║                                                               ║
-  ║   LIFT-TENSOR        LIFT-QUANTUM        LIFT-HYBRID          ║
-  ║   (AI dialect)       (QC dialect)        (Fusion dialect)     ║
-  ║                                                               ║
-  ╠═══════════════════════════════════════════════════════════════╣
-  ║        Simulate · Compile · Optimise · Predict                ║
-  ╠═══════════════════════════════════════════════════════════════╣
-  ║                                                               ║
-  ║  GPU (CUDA)   QPU (OpenQASM)   TPU (XLA)   CPU (LLVM)        ║
-  ║                                                               ║
-  ╚═══════════════════════════════════════════════════════════════╝
+  AI TOOLCHAIN                          QUANTUM TOOLCHAIN
+  ─────────────────────────             ─────────────────────────
+  PyTorch  ──┐                          Qiskit   ──┐
+  JAX      ──┼──► MLIR / ONNX           Cirq     ──┼──► OpenQASM 3
+  TF       ──┘        │                 PennyLane──┘       │
+                      ▼                                    ▼
+               CUDA / LLVM / XLA                 IBM Q / Rigetti / IonQ
+
+  ✗ No shared representation             ✗ No shared representation
+  ✗ No joint optimisation                ✗ Cannot compose with AI
+  ✗ Energy cost is invisible             ✗ Noise is an afterthought
+  ✗ 8+ config files per project          ✗ No simulation-first workflow
 ```
 
-LIFT is not another compiler. It is a **unified semantic layer** that speaks both the language of artificial intelligence (tensors, gradients, attention) and the language of quantum physics (qubits, gates, superposition) — simultaneously, in the same programme.
+### The Scale Problem
+
+```
+  AI MODEL SIZE (parameters):
+  2018  BERT-Large  ██  340M
+  2020  GPT-3       ████████████████████  175B
+  2023  GPT-4 est.  ████████████████████████████  ~1.7T
+  2025  Future      ████████████████████████████████  10T+
+  → 10T params in FP16 = 20 TB. No single IR handles this today.
+
+  QUANTUM HARDWARE (qubits):
+  2019  Google Sycamore  ██  53
+  2023  IBM Eagle         ██████████████████████  433
+  2026  Target            ████████████████████████████████  1000+
+  → Both worlds are scaling fast. The toolchain is not keeping up.
+```
 
 ---
 
-## 2. Why LIFT Exists — The Problem
+## 2. The Vision
 
-### 2.1 The Explosion of AI Model Size
+LIFT is a **unified semantic IR** that understands both AI computation (tensors, gradients, attention) and quantum computation (qubits, gates, decoherence) in the same programme, with one configuration file and one compilation pipeline.
 
 ```
-  MODEL SCALE GROWTH
-  ─────────────────────────────────────────────────────────────
-
-  2018  BERT-Large        ██  340M parameters
-  2020  GPT-3             ████████████████████  175B parameters
-  2023  GPT-4 (est.)      ████████████████████████████  1.7T
-  2025  Future models     ████████████████████████████████  10T+
-
-  CONSEQUENCE: 10T parameters in FP16 = 20 TB of memory
-               → Impossible on a single machine
-               → Training costs hundreds of millions of dollars
-               → No single IR handles this scale correctly
+  ╔═══════════════════════════════════════════════════════════╗
+  ║                                                           ║
+  ║   Your programme  (one .lif file)                        ║
+  ║                                                           ║
+  ╠════════════════╦══════════════════════════════════════════╣
+  ║  LIFT-TENSOR   ║  LIFT-QUANTUM         LIFT-HYBRID       ║
+  ║  AI operations ║  Quantum gates        Fusion dialect    ║
+  ╠════════════════╩══════════════════════════════════════════╣
+  ║                                                           ║
+  ║    SIMULATE → PREDICT → OPTIMISE → COMPILE               ║
+  ║                                                           ║
+  ╠═══════════════════════════════════════════════════════════╣
+  ║  CUDA (GPU)  OpenQASM 3 (QPU)  LLVM (CPU)  XLA (TPU)    ║
+  ╠═══════════════════════════════════════════════════════════╣
+  ║  H100 · A100 · IBM Kyoto · Rigetti · Google TPU · M3     ║
+  ╚═══════════════════════════════════════════════════════════╝
 ```
 
-### 2.2 The Fragmentation Crisis
+**The north star metric:** A researcher should go from idea to optimised hybrid execution on real hardware in under one hour, using one `.lif` file and one `.lith` config. Today that takes weeks.
 
-Today, a researcher working on hybrid AI+Quantum must manage:
+---
+
+## 3. Honest Comparison
+
+We present this honestly. `~✓` means planned and in design — not yet working.
+
+```
+  ┌────────────────────────┬──────┬──────┬──────────┬────────┬──────────┐
+  │ Capability             │ MLIR │ ONNX │ OpenQASM │ Qiskit │   LIFT   │
+  ├────────────────────────┼──────┼──────┼──────────┼────────┼──────────┤
+  │ AI tensor operations   │  ✓   │  ✓   │    ✗     │   ✗    │   ✓      │
+  │ Quantum gate ops       │  ✗   │  ✗   │    ✓     │   ✓    │  ~✓ dev  │
+  │ Hybrid AI+QC in one IR │  ✗   │  ✗   │    ✗     │  ~✓    │  ~✓ plan │
+  │ Noise in type system   │  ✗   │  ✗   │    ✗     │   ✗    │  ~✓ plan │
+  │ Linear qubit types     │  ✗   │  ✗   │    ✗     │   ✗    │  ~✓ plan │
+  │ Performance prediction │  ✗   │  ✗   │    ✗     │   ✗    │  ~✓ dev  │
+  │ Energy budgeting       │  ✗   │  ✗   │    ✗     │   ✗    │  ~✓ plan │
+  │ Single config file     │  ✗   │  ✗   │    ✗     │   ✗    │  ~✓ dev  │
+  │ Python bindings        │  ✓   │  ✓   │   ~✓     │   ✓    │  ~✓ dev  │
+  ├────────────────────────┼──────┼──────┼──────────┼────────┼──────────┤
+  │ Score today            │ 3/9  │ 2/9  │  3/9     │ 3/9    │  2/9 ✓   │
+  │ Score at v1.0 (plan)   │      │      │          │        │  8/9 ~✓  │
+  └────────────────────────┴──────┴──────┴──────────┴────────┴──────────┘
+
+  ✓   = implemented and stable today
+  ~✓  = planned, in design or active development
+  ✗   = not supported, not planned
+```
+
+### What LIFT Adds That Does Not Exist Today
+
+**1. One IR for both AI and quantum in the same programme**
+MLIR has quantum dialect research (QSSA, Catalyst, OpenQASM dialect). None treat noise as a first-class type attribute, and none provide a joint optimisation path between tensor and quantum operations. LIFT is the first to design both as equal citizens in the same SSA IR.
+
+**2. Noise as a type-level attribute**
+Every quantum gate operation in LIFT carries optional noise metadata (T1, T2, gate fidelity, crosstalk coefficients). The type checker, optimiser, and predictor all reason over this noise. When two noisy gates are fused, the composite noise model is derived from the Kraus operators. No existing IR does this.
+
+**3. Linear qubit types — no-cloning at compile time**
+The quantum no-cloning theorem is a physical law. In LIFT, qubit values are linear types: consumed exactly once. A qubit used twice is a compile-time error, not a runtime failure. Branches must consume the same qubit set on every arm.
+
+**4. Simulation-driven compilation with budget enforcement**
+Before any hardware executes, LIFT produces: FLOP count, peak memory, circuit depth, expected fidelity from the noise model, estimated latency, and energy cost. If any budget constraint in `.lith` is violated, compilation fails with a clear error message and suggestions. This is architecturally different from post-hoc profiling.
+
+**5. One configuration language**
+The `.lith` file controls compilation target, optimisation passes, budget constraints, simulation parameters, deployment, and monitoring. It replaces 6–8 separate configs that today require expert knowledge to coordinate.
+
+---
+
+## 4. Twin Dialects
+
+### The Structural Isomorphism
+
+The deepest insight behind LIFT: AI computation and quantum computation face the same class of compilation challenges, with different vocabulary.
+
+```
+  AI DOMAIN                            QUANTUM DOMAIN
+  ══════════════════════════════════════════════════════════
+  Tensor (vector of floats)       ↔   Quantum state (amplitude vector)
+  Linear layer (matrix multiply)  ↔   Unitary gate (unitary multiply)
+  Non-linearity (ReLU)            ↔   Measurement (projection/collapse)
+  Backpropagation (reverse AD)    ↔   Parameter shift rule (adjoint diff)
+  Batch dimension                 ↔   Shot parallelism
+  INT8 quantisation               ↔   Gate decomposition to native basis
+  Layer fusion (MatMul+ReLU)      ↔   Gate cancellation (H·H = I)
+  Memory layout (NCHW vs NHWC)    ↔   Qubit mapping (logical → physical)
+  Multi-GPU data parallelism      ↔   Multi-QPU shot parallelism
+  Gradient checkpoint             ↔   Mid-circuit reset and reuse
+  ──────────────────────────────────────────────────────────
+  The dialects are twins because the PROBLEMS are isomorphic.
+  LIFT exploits this for joint optimisation.
+```
+
+### SSA Form: The Shared Foundation
+
+Every value in LIFT is defined exactly once (Static Single Assignment). This property makes analysis and optimisation provably correct.
+
+```
+  TRADITIONAL (mutable)        LIFT SSA FORM
+  ──────────────────────       ─────────────────────────────────────
+  x = matmul(A, B)             %v0 = tensor.matmul(%A, %B)
+  x = relu(x)         →        %v1 = tensor.relu(%v0)
+  x = layernorm(x, w)          %v2 = tensor.layernorm(%v1, %w, %b)
+
+                               Each %vi defined ONCE → safe to
+                               fuse, reorder, parallelise, analyse.
+```
+
+### Linear Types: Enforcing the No-Cloning Theorem
+
+```
+  FORBIDDEN — qubit used twice:        CORRECT — SSA qubit chain:
+  ─────────────────────────────        ─────────────────────────────────
+  %q0 = quantum.init()                 %q0 = quantum.init()  : qubit
+  %q1 = quantum.x(%q0)                 %q1 = quantum.x(%q0)  : qubit
+  %q2 = quantum.h(%q0)  ← ERROR        %q2 = quantum.h(%q1)  : qubit
+                                        %b0 = quantum.meas(%q2) : bit
+  The type checker tracks a
+  consumed set. %q0 was consumed       %q0 → %q1 → %q2 → %b0
+  by quantum.x. Reuse = error.         Linear. Physically correct.
+```
+
+**Branches:** Every branch arm must consume the same set of qubits. A qubit that is consumed in the `then` arm but not the `else` arm is a compile-time error.
+
+**Noise composition in fusion:** When two noisy gates are fused, the composite noise model is derived. For the initial implementation, we use a depolarising approximation. Full Kraus operator composition is planned for v1.1.
+
+### The Three Dialects
 
 ```
   ┌─────────────────────────────────────────────────────────────┐
-  │  TOOLS A HYBRID RESEARCHER MUST KNOW TODAY                  │
-  ├─────────────────────────────────────────────────────────────┤
-  │  PyTorch          → for AI model definition                 │
-  │  ONNX             → for AI model export                     │
-  │  TensorRT         → for GPU inference optimisation          │
-  │  MLIR             → for compiler infrastructure             │
-  │  Qiskit           → for quantum circuit definition          │
-  │  OpenQASM 3       → for quantum hardware submission         │
-  │  PennyLane        → for quantum gradients                   │
-  │  ZNE / PEC / CDR  → for error mitigation                   │
-  │  SABRE routing    → for qubit topology mapping              │
-  ├─────────────────────────────────────────────────────────────┤
-  │  = 9+ incompatible tools, no unified abstraction           │
+  │                       LIFT-CORE                             │
+  │   SSA · Types · Ops · Blocks · Regions · Functions         │
+  │   Shared foundation — all dialects build on this           │
+  └────────────────────────┬────────────────────────────────────┘
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+  ┌───────────▼──────────┐   ┌──────────▼──────────┐
+  │    LIFT-TENSOR       │   │   LIFT-QUANTUM       │
+  │    AI dialect        │   │   QC dialect         │
+  │                      │   │                      │
+  │  Tensors, shapes     │   │  Qubits (linear)     │
+  │  Auto-diff, grads    │   │  Gates + noise attr  │
+  │  Attention, KV cache │   │  Layout mapping      │
+  │  MoE, quantisation   │   │  Hamiltonians        │
+  │  Parallelism         │   │  Error correction    │
+  └──────────┬───────────┘   └───────────┬──────────┘
+             │                           │
+             └─────────────┬─────────────┘
+                           │
+  ┌────────────────────────▼────────────────────────────────────┐
+  │                    LIFT-HYBRID                              │
+  │   Classical ↔ Quantum encoding                             │
+  │   Parameterised quantum circuits (VQC, QNN)                │
+  │   Joint classical+quantum gradient computation             │
+  │   GPU-side + QPU-side co-execution                         │
   └─────────────────────────────────────────────────────────────┘
 ```
 
-### 2.3 The Hardware Diversity Problem
-
-```
-  ONE MODEL → MANY TARGETS (NO UNIFIED PATH TODAY)
-
-  ┌─────────────┐
-  │  AI Model   │──→ NVIDIA H100 (sm_90, Tensor Cores, HBM3)
-  │             │──→ AMD MI300 (CDNA3, HBM3, ROCm)
-  │  Quantum    │──→ IBM Kyoto (Heavy-Hex, 127 qubits)
-  │  Circuit    │──→ Rigetti Aspen (grid, 80 qubits)
-  │             │──→ IonQ Aria (all-to-all, 25 qubits)
-  │  Hybrid     │──→ GPU + QPU co-execution (no standard today)
-  └─────────────┘
-
-  ✗  Each target requires a completely different toolchain
-  ✗  No shared optimisation between AI and quantum paths
-  ✗  No joint simulation before deploying
-```
-
 ---
 
-## 3. How LIFT Is Better Than Existing IRs
-
-### 3.1 Comparison Table
-
-```
-  ┌──────────────────┬────────┬─────────┬──────────┬──────────┬──────────┐
-  │ Capability       │ MLIR   │ ONNX    │ OpenQASM │ Qiskit   │  LIFT    │
-  ├──────────────────┼────────┼─────────┼──────────┼──────────┼──────────┤
-  │ AI Tensors       │   ✓    │   ✓     │    ✗     │    ✗     │   ✓✓    │
-  │ Quantum Circuits │   ✗    │   ✗     │    ✓     │    ✓     │   ✓✓    │
-  │ Hybrid AI+QC     │   ✗    │   ✗     │    ✗     │   ~✓     │   ✓✓    │
-  │ Noise modelling  │   ✗    │   ✗     │   ~✓     │    ✓     │   ✓✓    │
-  │ Auto-diff        │   ~✓   │   ✗     │    ✗     │   ~✓     │   ✓✓    │
-  │ Hardware sim.    │   ✗    │   ✗     │    ✗     │    ✗     │   ✓✓    │
-  │ Energy model     │   ✗    │   ✗     │    ✗     │    ✗     │   ✓✓    │
-  │ Perf. prediction │   ✗    │   ✗     │    ✗     │    ✗     │   ✓✓    │
-  │ Joint optimise   │   ✗    │   ✗     │    ✗     │    ✗     │   ✓✓    │
-  │ Single config    │   ✗    │   ✗     │    ✗     │    ✗     │   ✓✓    │
-  │ Config language  │   ✗    │   ✗     │    ✗     │    ✗     │   ✓✓    │
-  ├──────────────────┼────────┼─────────┼──────────┼──────────┼──────────┤
-  │ Score            │  3/11  │  2/11   │   3/11   │  4/11    │  11/11   │
-  └──────────────────┴────────┴─────────┴──────────┴──────────┴──────────┘
-
-  ✓✓ = Native, first-class support
-  ~✓  = Partial or indirect support
-  ✗   = Not supported
-```
-
-### 3.2 What LIFT Adds That No One Has
-
-```
-  UNIQUE FEATURES OF LIFT
-  ─────────────────────────────────────────────────────────────
-
-  1. TWIN DIALECT ARCHITECTURE
-     AI and quantum described in the same file,
-     with a fusion dialect for hybrids.
-     → No glue code, no data marshalling by hand.
-
-  2. SIMULATION-FIRST PHILOSOPHY
-     Before any hardware execution, LIFT simulates
-     your programme to predict performance and errors.
-     → Zero-surprise deployments.
-
-  3. NOISE-AWARE IR
-     Quantum noise (T1, T2, gate errors, crosstalk)
-     is a first-class citizen of the type system.
-     → Compile with realism, not wishful thinking.
-
-  4. ENERGY & CARBON MODELLING
-     Every programme carries an energy budget.
-     LIFT rejects compilations that exceed it.
-     → Sustainable AI+Quantum at scale.
-
-  5. .lith CONFIGURATION LANGUAGE
-     One file controls everything: compilation,
-     optimisation, prediction, deployment, monitoring.
-     → Replace 9 config files with 1.
-
-  6. HARDWARE DIGITAL TWIN
-     Simulate hardware that doesn't exist yet.
-     Validate code before the chip is fabricated.
-     → Future-proof development.
-```
-
----
-
-## 4. Core Concept: Twin Dialects Architecture
-
-The most important insight in LIFT: **AI and Quantum computing share deep structural similarities, but require fundamentally different primitives.** LIFT handles both with twin dialects that can be composed.
-
-### 4.1 The Three Dialects
+## 5. Architecture
 
 ```
   ╔══════════════════════════════════════════════════════════════════╗
-  ║                    LIFT TWIN DIALECTS                            ║
-  ╠════════════════════╦═════════════════════════════════════════════╣
-  ║                    ║                                             ║
-  ║   LIFT-TENSOR      ║         LIFT-QUANTUM                        ║
-  ║   ──────────       ║         ─────────────                       ║
-  ║                    ║                                             ║
-  ║  • Tensors          ║  • Qubits (logical & physical)             ║
-  ║  • Gradients        ║  • Quantum gates (1Q, 2Q, 3Q)             ║
-  ║  • Attention        ║  • Noise models (T1, T2, crosstalk)       ║
-  ║  • KV Cache         ║  • Error correction codes                  ║
-  ║  • MoE routing      ║  • Layout mapping (SABRE, A*)             ║
-  ║  • Quantization     ║  • State representations                  ║
-  ║  • FlashAttention   ║  • Hamiltonian terms                      ║
-  ║  • Parallelism      ║  • Measurement bases                      ║
-  ║                    ║                                             ║
-  ╠════════════════════╩═════════════════════════════════════════════╣
-  ║                                                                  ║
-  ║                    LIFT-HYBRID (Fusion)                          ║
-  ║                    ─────────────────────                         ║
-  ║                                                                  ║
-  ║  • Classical → Quantum data encoding                            ║
-  ║  • Parameterised quantum circuits (VQC, QNN)                   ║
-  ║  • Joint optimisation (classical + quantum params)             ║
-  ║  • Hybrid simulation (GPU-side + QPU-side)                     ║
-  ║  • Measurement post-processing via AI                          ║
-  ║                                                                  ║
+  ║                       LIFT FRAMEWORK                             ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  USER LAYER                                                      ║
+  ║  .lif source  │  .lith config  │  lift(1) CLI  │  Python API    ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  FRONTEND                                                        ║
+  ║  Lexer → Parser → AST → Type Check → SSA Build                  ║
+  ║  Importers: PyTorch FX | ONNX | Qiskit | OpenQASM3 | Cirq       ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  DIALECT LAYER (Twin IR)                                         ║
+  ║  LIFT-CORE  │  LIFT-TENSOR  │  LIFT-QUANTUM  │  LIFT-HYBRID     ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  SIMULATION + PREDICTION ENGINE                                  ║
+  ║  Shape inference │ FLOP count │ Noise simulation                 ║
+  ║  GNN perf predict│ Fidelity   │ Energy budget  │ Carbon est.     ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  OPTIMISATION PASS PIPELINE                                      ║
+  ║  AI:      TensorFusion · FlashAttention · KVCache · INT8         ║
+  ║  Quantum: GateCancellation · SABRE Layout · ZNE · QEC            ║
+  ║  Hybrid:  HybridFusion · ParameterShift · EncodingOpt            ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  BACKENDS                                                        ║
+  ║  CUDA (PTX)  │  OpenQASM 3  │  LLVM IR  │  XLA/StableHLO        ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  HARDWARE                                                        ║
+  ║  H100 · A100 · MI300 │ IBM Kyoto · Rigetti · IonQ │ TPU · CPU   ║
   ╚══════════════════════════════════════════════════════════════════╝
 ```
 
-### 4.2 The SSA Form — Foundation of All Dialects
-
-Every dialect in LIFT uses **Static Single Assignment (SSA) form**: each value is defined exactly once. This property makes analysis, optimisation and transformation provably correct.
+### Workspace Layout
 
 ```
-  TRADITIONAL CODE:           LIFT SSA FORM:
-  ─────────────────           ──────────────
-
-  x = matmul(A, B)            %v0 = tensor.matmul(%A, %B)
-  x = relu(x)                 %v1 = tensor.relu(%v0)
-  x = layernorm(x)            %v2 = tensor.layernorm(%v1, %w, %b)
-                              ─────────────────────────────────────
-                              Each %vi defined ONCE → safe to
-                              analyse, fuse, parallelise, reorder.
-```
-
-### 4.3 Why Twins? The Structural Isomorphism
-
-```
-  AI COMPUTATION                   QUANTUM COMPUTATION
-  ──────────────                   ───────────────────
-
-  Input tensor                ↔   Initial qubit state
-  Linear transformation       ↔   Unitary gate
-  Non-linearity (ReLU)        ↔   Measurement (collapse)
-  Backpropagation             ↔   Adjoint differentiation
-  Batch parallelism           ↔   Shot parallelism
-  Weight quantization         ↔   Gate decomposition
-  Layer fusion                ↔   Gate cancellation
-  Memory layout               ↔   Qubit mapping
-
-  → The dialects are twins because the PROBLEMS are isomorphic.
-  → LIFT exploits this isomorphism for joint optimisation.
+  lift/
+  ├── crates/
+  │   ├── lift-core/        SSA IR, types, operations (no external deps)
+  │   ├── lift-ast/         .lif lexer, parser, AST
+  │   ├── lift-tensor/      AI dialect
+  │   ├── lift-quantum/     Quantum dialect
+  │   ├── lift-hybrid/      Fusion dialect
+  │   ├── lift-sim/         Static analysis + quantum simulator
+  │   ├── lift-predict/     GNN performance prediction
+  │   ├── lift-opt/         Pass manager + all optimisation passes
+  │   ├── lift-import/      PyTorch FX, ONNX, Qiskit, OpenQASM3 importers
+  │   ├── lift-export/      CUDA, OpenQASM3, LLVM, XLA backends
+  │   │   Cargo.toml  →     features: [cuda, openqasm, llvm, xla]
+  │   ├── lift-config/      .lith configuration language parser
+  │   ├── lift-python/      Python bindings (PyO3/Maturin)
+  │   └── lift-cli/         lift(1) command-line interface
+  ├── examples/             .lif example programmes
+  ├── tests/                integration and regression tests
+  └── benches/              benchmark suite
 ```
 
 ---
 
-## 5. What LIFT Achieves
+## 6. The Four Pillars
 
-### 5.1 The Four Core Capabilities
+### Pillar 1 — SIMULATE
 
-```
-  ┌────────────────────────────────────────────────────────────────┐
-  │                                                                │
-  │   SIMULATE      COMPILE      OPTIMISE      PREDICT            │
-  │   ────────      ───────      ────────      ───────            │
-  │                                                                │
-  │   Understand    Generate     Transform     Forecast           │
-  │   behaviour     optimal      IR for        performance        │
-  │   statically    executable   maximum       and fidelity       │
-  │   before        code for     performance   before any         │
-  │   running       any target                 execution          │
-  │                                                                │
-  └────────────────────────────────────────────────────────────────┘
-```
-
-### 5.2 Concrete Improvements Over Today
+Static analysis before any hardware is involved:
 
 ```
-  METRIC                   TODAY              WITH LIFT
-  ──────────────────────   ─────────          ─────────────
+  .lif module → shape propagation → FLOP counting → memory analysis
+              → noise accumulation → fidelity estimate → energy model
+              → SIMULATION REPORT
 
-  Tools to configure       8-12               1 (.lith file)
-  Time to hybrid setup     2-4 weeks          Hours
-  Noise-aware compilation  Manual             Automatic
-  Joint AI+QC optimise     Impossible         Native
-  Energy budget control    None               First-class
-  Pre-deployment sim       Partial            Full stack
-  Hardware portability     Low                Write once, run many
-  Error prediction         Post-hoc           Pre-execution
-  Carbon tracking          None               Built-in
+  Example report:
+  ──────────────────────────────────────────────────────
+  AI:      4.7 TFLOPS · 12.4 GB peak · 1,847 req/s est.
+  Quantum: depth=24 · 87 gates · fidelity=97.3% ± 0.8%
+  Energy:  0.003 kWh · 1.05 gCO₂ (us-east-1 grid)
+  ──────────────────────────────────────────────────────
+```
+
+### Pillar 2 — PREDICT
+
+A trained GNN model predicts performance before hardware executes. Budget violations stop compilation:
+
+```
+  Budget check:
+  Latency:   47ms    ✓  (budget: 100ms)
+  Fidelity:  99.1%   ✓  (budget: >=95%)
+  Memory:    31.4 GB ✓  (budget: 40 GB)
+  Energy:    0.003   ✓  (budget: 0.01 kWh)
+
+  vs.
+
+  ERROR: latency 147ms exceeds budget 100ms
+  Suggestions:
+    1. Reduce seq_len 2048→1024  (est: 82ms)
+    2. Enable INT8 quantisation  (est: 71ms)
+```
+
+**GNN Architecture:** Graph Neural Network with 6 message-passing layers, hidden dim 256, trained on 100K+ (IR graph, hardware features, measured performance) triples. Falls back to analytical model if the ML model is unavailable or confidence is low.
+
+### Pillar 3 — OPTIMISE
+
+All optimisation passes are **semantics-preserving by construction**: type-preserving transformations cannot change observable outputs. For complex passes (layout mapping, quantisation), correctness is validated against a suite of 5,000+ reference programmes.
+
+```
+  AI PASSES:
+  ─────────────────────────────────────────────────────────────────
+  tensor-fusion        Pattern-based (not Ullmann): MatMul+Bias+ReLU
+                       → fused kernel. O(E+V) per pattern.
+                       Gain: 30–50% less memory bandwidth.
+
+  flash-attention      O(n²) → tiled O(n). FlashAttention v2/v3.
+                       Triggered when seq_len > 512 on GPU.
+                       Gain: 10–20× on long sequences.
+
+  kv-cache             Pre-allocate key-value memory for LLM.
+                       Gain: 100× latency for incremental inference.
+
+  quantization         INT8/FP8. Dynamic or static calibration.
+                       Gain: 4× model size, 2–4× throughput.
+
+  QUANTUM PASSES:
+  ─────────────────────────────────────────────────────────────────
+  gate-cancellation    Algebraic identities + commutation table.
+                       H·H=I, X·X=I, Rz(a)·Rz(b)=Rz(a+b).
+                       Gain: 15–40% depth reduction.
+
+  layout-mapping       SABRE algorithm (noise-aware variant).
+                       Minimises SWAP insertions on physical topology.
+
+  zne-mitigation       Gate folding (1×, 2×, 3× noise) + Richardson
+                       extrapolation to zero noise.
+                       Gain: 5–20× fidelity improvement.
+```
+
+### Pillar 4 — COMPILE
+
+```
+  OPTIMISED IR
+   ├──► CUDA backend  → Tensor Core kernels · memory-coalesced access
+   ├──► OpenQASM 3    → gate decomposition · layout · pulse schedule
+   ├──► LLVM backend  → CPU native binary · AVX-512 · OpenMP
+   └──► Hybrid runner → GPU+QPU orchestration · sync · data transfer
 ```
 
 ---
 
-## 6. Architecture Deep Dive
-
-### 6.1 Full System Architecture
-
-```
-  ╔═════════════════════════════════════════════════════════════════════╗
-  ║                         LIFT FRAMEWORK                              ║
-  ║                                                                     ║
-  ║  ┌─────────────────────────────────────────────────────────────┐   ║
-  ║  │                    USER LAYER                               │   ║
-  ║  │                                                             │   ║
-  ║  │   .lif files          .lith configs        CLI / API       │   ║
-  ║  │   (IR source)         (project config)     (tooling)       │   ║
-  ║  └──────────────────────────┬──────────────────────────────────┘   ║
-  ║                             │                                       ║
-  ║                             ▼                                       ║
-  ║  ┌─────────────────────────────────────────────────────────────┐   ║
-  ║  │                  FRONTEND LAYER                             │   ║
-  ║  │                                                             │   ║
-  ║  │  Parser → Lexer → AST → Type Checker → SSA Builder         │   ║
-  ║  │                                                             │   ║
-  ║  │  Importers: PyTorch FX | Qiskit | ONNX | OpenQASM | Cirq   │   ║
-  ║  └──────────────────────────┬──────────────────────────────────┘   ║
-  ║                             │                                       ║
-  ║                             ▼                                       ║
-  ║  ┌─────────────────────────────────────────────────────────────┐   ║
-  ║  │                 DIALECT LAYER (Twin IR)                     │   ║
-  ║  │                                                             │   ║
-  ║  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐    │   ║
-  ║  │  │ LIFT-CORE   │  │ LIFT-TENSOR │  │ LIFT-QUANTUM    │    │   ║
-  ║  │  │ (SSA base)  │  │ (AI ops)    │  │ (QC ops+noise)  │    │   ║
-  ║  │  └─────────────┘  └─────────────┘  └─────────────────┘    │   ║
-  ║  │                         LIFT-HYBRID                         │   ║
-  ║  │                   (fusion operations)                       │   ║
-  ║  └──────────────────────────┬──────────────────────────────────┘   ║
-  ║                             │                                       ║
-  ║                             ▼                                       ║
-  ║  ┌─────────────────────────────────────────────────────────────┐   ║
-  ║  │           SIMULATION → PREDICTION ENGINE                    │   ║
-  ║  │                                                             │   ║
-  ║  │  Static Analysis │ Shape Inference │ FLOP Counting          │   ║
-  ║  │  Memory Tracing  │ Noise Simulation│ Fidelity Prediction    │   ║
-  ║  │  Energy Budget   │ Latency Model  │ Thermal Simulation      │   ║
-  ║  └──────────────────────────┬──────────────────────────────────┘   ║
-  ║                             │                                       ║
-  ║                             ▼                                       ║
-  ║  ┌─────────────────────────────────────────────────────────────┐   ║
-  ║  │              OPTIMISATION PASS PIPELINE                     │   ║
-  ║  │                                                             │   ║
-  ║  │  AI Passes:                 Quantum Passes:                 │   ║
-  ║  │  • Tensor Fusion            • Gate Cancellation             │   ║
-  ║  │  • FlashAttention           • Rotation Merging              │   ║
-  ║  │  • KV Cache                 • Layout Mapping (SABRE)        │   ║
-  ║  │  • Quantization (INT8/FP8)  • Error Mitigation (ZNE)        │   ║
-  ║  │  • MoE Routing              • QEC Code Insertion            │   ║
-  ║  │  • Parallelism Strategy     • SWAP Minimisation             │   ║
-  ║  │                                                             │   ║
-  ║  │  Hybrid Passes:                                             │   ║
-  ║  │  • Hybrid Fusion            • Parameter Tuning              │   ║
-  ║  │  • Encoding Optimisation    • Joint Gradient Computation    │   ║
-  ║  └──────────────────────────┬──────────────────────────────────┘   ║
-  ║                             │                                       ║
-  ║                             ▼                                       ║
-  ║  ┌─────────────────────────────────────────────────────────────┐   ║
-  ║  │                   BACKEND LAYER                             │   ║
-  ║  │                                                             │   ║
-  ║  │   CUDA (GPU)    OpenQASM 3 (QPU)    LLVM (CPU)    XLA (TPU)│   ║
-  ║  └──────────────────────────┬──────────────────────────────────┘   ║
-  ║                             │                                       ║
-  ║                             ▼                                       ║
-  ║  ┌─────────────────────────────────────────────────────────────┐   ║
-  ║  │                  HARDWARE LAYER                             │   ║
-  ║  │                                                             │   ║
-  ║  │  NVIDIA H100 │ AMD MI300 │ IBM Kyoto │ Rigetti │ Google TPU │   ║
-  ║  └─────────────────────────────────────────────────────────────┘   ║
-  ╚═════════════════════════════════════════════════════════════════════╝
-```
-
-### 6.2 The .lif Source File
-
-Programs are written in `.lif` files using a dialect-tagged syntax:
+## 7. The .lif Language
 
 ```lif
-// File: quantum_llm.lif
-// A hybrid programme: LLM inference assisted by quantum sampling
+// File: qnn_classifier.lif
+// Hybrid QNN: classical encoder → 4-qubit layer → classical decoder
 
 #dialect tensor
 
-module @classical_encoder {
-    func @encode(%input: tensor<1x784xf32>) -> tensor<1x4xf32> {
-        %h0 = "tensor.linear"(%input, %W1, %b1) : (...) -> tensor<1x256xf32>
-        %h1 = "tensor.relu"(%h0) : (tensor<1x256xf32>) -> tensor<1x256xf32>
-        %out = "tensor.linear"(%h1, %W2, %b2) : (...) -> tensor<1x4xf32>
+module @encoder {
+    func @encode(%img: tensor<1x784xf32>) -> tensor<1x4xf32> {
+        %h0  = "tensor.linear"(%img, %W1, %b1)
+               : (tensor<1x784xf32>, tensor<784x64xf32>, tensor<64xf32>)
+               -> tensor<1x64xf32>
+        %h1  = "tensor.relu"(%h0) : (tensor<1x64xf32>) -> tensor<1x64xf32>
+        %out = "tensor.linear"(%h1, %W2, %b2)
+               : (tensor<1x64xf32>, tensor<64x4xf32>, tensor<4xf32>)
+               -> tensor<1x4xf32>
         return %out
     }
 }
 
 #dialect quantum
 
-module @quantum_sampler {
-    func @sample(%params: tensor<4xf32>) -> (qubit, qubit, qubit, qubit) {
-        %q0, %q1, %q2, %q3 = "quantum.init"(4) : (i64) -> (qubit,qubit,qubit,qubit)
-        %q0 = "quantum.rx"(%q0, %params[0]) : (qubit, f32) -> qubit
-        %q1 = "quantum.ry"(%q1, %params[1]) : (qubit, f32) -> qubit
+module @q_layer {
+    func @forward(%feat: tensor<4xf32>, %params: tensor<8xf32>)
+                  -> (qubit, qubit, qubit, qubit) {
+        // Each qubit value is linear — used exactly once
+        %q0 = "quantum.init"() : () -> qubit
+        %q1 = "quantum.init"() : () -> qubit
+        %q2 = "quantum.init"() : () -> qubit
+        %q3 = "quantum.init"() : () -> qubit
+
+        // Angle encoding: feature[i] → rotation angle
+        %q0 = "quantum.ry"(%q0, %feat[0]) : (qubit, f32) -> qubit
+        %q1 = "quantum.ry"(%q1, %feat[1]) : (qubit, f32) -> qubit
+        %q2 = "quantum.ry"(%q2, %feat[2]) : (qubit, f32) -> qubit
+        %q3 = "quantum.ry"(%q3, %feat[3]) : (qubit, f32) -> qubit
+
+        // Entangling layer
         %q0, %q1 = "quantum.cx"(%q0, %q1) : (qubit, qubit) -> (qubit, qubit)
+        %q2, %q3 = "quantum.cx"(%q2, %q3) : (qubit, qubit) -> (qubit, qubit)
+
+        // Trainable rotations
+        %q0 = "quantum.rz"(%q0, %params[0]) : (qubit, f32) -> qubit
+        %q1 = "quantum.rz"(%q1, %params[1]) : (qubit, f32) -> qubit
+        %q2 = "quantum.rz"(%q2, %params[2]) : (qubit, f32) -> qubit
+        %q3 = "quantum.rz"(%q3, %params[3]) : (qubit, f32) -> qubit
+
         return %q0, %q1, %q2, %q3
     }
 }
 
 #dialect hybrid
 
-module @hybrid_classifier {
+module @classifier {
     func @classify(%image: tensor<1x784xf32>) -> tensor<1x10xf32> {
         // Step 1: classical encoding
-        %features = "tensor.call"(@encode, %image) : (...) -> tensor<1x4xf32>
+        %feat = "tensor.call"(@encoder::@encode, %image)
+                : (tensor<1x784xf32>) -> tensor<1x4xf32>
 
-        // Step 2: quantum processing
-        %qubits = "hybrid.encode"(%features) {encoding = "angle"} : (...) -> (qubit,qubit,qubit,qubit)
-        %qout   = "quantum.call"(@sample, %qubits) : (...) -> (qubit,qubit,qubit,qubit)
+        // Step 2: quantum layer (encoding + parameterised circuit)
+        %q0, %q1, %q2, %q3 = "hybrid.angle_encode_forward"(
+                @q_layer::@forward, %feat, %params)
+                : (tensor<1x4xf32>, tensor<8xf32>)
+                -> (qubit, qubit, qubit, qubit)
 
-        // Step 3: measure and decode
-        %bits   = "quantum.measure_all"(%qout) : (...) -> tensor<4xi1>
-        %logits = "tensor.linear"(%bits, %Wout, %bout) : (...) -> tensor<1x10xf32>
+        // Step 3: measurement — consumes all qubits (linear type)
+        %b0 = "quantum.measure"(%q0) : (qubit) -> bit
+        %b1 = "quantum.measure"(%q1) : (qubit) -> bit
+        %b2 = "quantum.measure"(%q2) : (qubit) -> bit
+        %b3 = "quantum.measure"(%q3) : (qubit) -> bit
+
+        // Step 4: classical output head
+        %bits   = "tensor.stack"(%b0,%b1,%b2,%b3)
+                  : (bit,bit,bit,bit) -> tensor<4xi1>
+        %logits = "tensor.linear"(%bits, %Wout, %bout)
+                  : (tensor<4xi1>, tensor<4x10xf32>, tensor<10xf32>)
+                  -> tensor<1x10xf32>
         return %logits
     }
 }
 ```
 
-### 6.3 The .lith Configuration File
+---
 
-A single `.lith` file controls the entire build pipeline:
+## 8. The .lith Configuration
+
+One file replaces 8+ separate configs:
 
 ```lith
-// File: project.lith — One file to rule them all
+// File: project.lith
 
 project {
-    name    = "hybrid-classifier"
-    version = "1.0.0"
+    name        = "hybrid-qnn"
+    version     = "1.0.0"
+    description = "QNN classifier: classical encoder + 4-qubit layer"
 }
 
 dialects {
@@ -482,476 +525,110 @@ dialects {
 compilation {
     target {
         type = "hybrid"
-        gpu { backend = "cuda"  arch = "sm_90" }
-        qpu { provider = "ibm"  backend_name = "ibm_kyoto"  shots = 4096 }
+
+        gpu {
+            backend          = "cuda"
+            arch             = "sm_90"     // H100
+            memory_limit_gb  = 80
+            tensor_cores     = true
+        }
+
+        qpu {
+            provider         = "ibm"
+            backend_name     = "ibm_kyoto"
+            shots            = 4096
+            optimization_level = 3
+
+            error_mitigation {
+                readout_error        = true
+                dynamical_decoupling = true
+                zero_noise_extrap    = true
+            }
+        }
     }
 }
 
 optimization {
     pipeline = [
-        "tensor-fusion", "flash-attention", "quantization",
-        "gate-cancellation", "layout-mapping", "error-mitigation",
-        "hybrid-fusion"
+        "canonicalize", "constant-folding",
+        "tensor-fusion", "quantization",
+        "gate-cancellation", "rotation-merging",
+        "layout-mapping", "zne-mitigation",
+        "hybrid-fusion", "parameter-shift"
     ]
+
+    passes {
+        quantization {
+            precision   = "int8"
+            calibration = "dynamic"
+        }
+        layout-mapping {
+            algorithm = "sabre-noise-aware"
+            rounds    = 3
+        }
+        zne-mitigation {
+            noise_factors   = [1, 2, 3]
+            extrapolation   = "richardson"
+        }
+    }
 }
 
 prediction {
     budget {
-        max_latency_ms  = 100
-        min_fidelity    = 0.95
+        max_latency_ms  = 200
+        min_fidelity    = 0.92
+        max_memory_gb   = 40
         max_energy_kwh  = 0.01
     }
+}
+
+metrics {
+    collect = ["latency_ms", "fidelity", "memory_gb", "energy_kwh", "co2_grams"]
 }
 ```
 
 ---
 
-## 7. The Four Pillars
+## 9. Current Status
 
-### Pillar 1: SIMULATE
+| Component | Status | Works today | Next milestone |
+|-----------|--------|-------------|----------------|
+| `lift-core` | ✅ Alpha | SSA IR, types, ops, verifier, printer | Incremental compilation |
+| `lift-ast` | ✅ Alpha | Lexer, parser, error recovery | Error quality |
+| `lift-tensor` | 🚧 Active | MatMul, Add, ReLU, Conv2D, basic passes | Attention, KV cache, quantisation |
+| `lift-quantum` | 📐 Design | Type system designed | Gate ops, noise model |
+| `lift-hybrid` | 📐 Design | Architecture decided | All ops |
+| `lift-sim` | 🚧 Active | Shape propagation, FLOP count | QC simulator, GNN predictor |
+| `lift-predict` | 📐 Design | Architecture designed | GNN training pipeline |
+| `lift-opt` | 🚧 Active | Pass manager, const-fold, DCE | Fusion, quantum passes |
+| `lift-import` | 🚧 Active | PyTorch FX ~80%, OpenQASM3 ~60% | ONNX, Qiskit, Cirq |
+| `lift-export` | 🚧 Active | LLVM ~70%, OpenQASM3 ~40% | CUDA backend |
+| `lift-config` | 🚧 Active | Core .lith syntax ~60% | Validation, inheritance |
+| `lift-python` | 📐 Design | PyO3 scaffold only | Full Python API |
+| `lift-cli` | 🚧 Active | `lift analyse`, `lift verify` | compile, simulate, predict |
 
-```
-  SIMULATION PIPELINE
-  ────────────────────────────────────────────────────────────
-
-  Input: .lif module
-     │
-     ▼
-  ┌─────────────────────────────────────────────────────────┐
-  │  STATIC ANALYSIS                                        │
-  │  • Type inference         • Shape propagation           │
-  │  • Memory layout analysis • Dependency graph            │
-  │  • Reachability           • Dead code detection         │
-  └───────────────────────────┬─────────────────────────────┘
-                              │
-                              ▼
-  ┌─────────────────────────────────────────────────────────┐
-  │  SYMBOLIC EXECUTION                                     │
-  │  • Symbolic tensor values • Symbolic qubit states       │
-  │  • Interval arithmetic    • Range analysis              │
-  │  • Overflow detection     • NaN propagation             │
-  └───────────────────────────┬─────────────────────────────┘
-                              │
-                              ▼
-  ┌─────────────────────────────────────────────────────────┐
-  │  RESOURCE ESTIMATION                                    │
-  │  • FLOP counting          • Gate count                  │
-  │  • Memory peak (bytes)    • Circuit depth               │
-  │  • Bandwidth pressure     • Qubit count                 │
-  │  • Energy (joules)        • Noise accumulation          │
-  └───────────────────────────┬─────────────────────────────┘
-                              │
-                              ▼
-  ┌─────────────────────────────────────────────────────────┐
-  │  SIMULATION REPORT                                      │
-  │                                                         │
-  │  ✓ 4.7 TFLOPS · 12.4 GB peak · 47ms estimated          │
-  │  ✓ Circuit depth: 24 · Gate count: 87 · Qubits: 12     │
-  │  ✓ Expected fidelity: 97.3% ± 0.8%                     │
-  │  ✓ Energy: 0.003 kWh · CO₂: 1.05 gCO₂                  │
-  └─────────────────────────────────────────────────────────┘
-```
-
-### Pillar 2: COMPILE
-
-```
-  COMPILATION PIPELINE
-  ────────────────────────────────────────────────────────────
-
-  .lif IR (optimised)
-     │
-     ├──→ [CUDA backend]
-     │       Tensor Cores kernels
-     │       Memory-coalesced access
-     │       Warp-level primitives
-     │       → .ptx / .cubin
-     │
-     ├──→ [OpenQASM 3 backend]
-     │       Gate decomposition
-     │       Layout mapping
-     │       Pulse schedule gen
-     │       → .qasm3
-     │
-     ├──→ [LLVM backend]
-     │       SIMD vectorisation
-     │       Loop unrolling
-     │       → .o / .so
-     │
-     └──→ [Hybrid runner]
-             Orchestration code
-             Classical ↔ QPU sync
-             → .lift_binary
-```
-
-### Pillar 3: OPTIMISE
-
-```
-  OPTIMISATION PASSES — WHAT EACH ONE DOES
-  ──────────────────────────────────────────────────────────
-
-  AI PASSES
-  ──────────
-  tensor-fusion        Fuse MatMul+Bias+ReLU into one kernel
-                       → 30-50% memory reduction
-
-  flash-attention      Replace O(n²) attention with tiled I/O
-                       → 10-20× speed on long sequences
-
-  kv-cache             Pre-allocate key/value memory for LLM
-                       → 100× latency reduction for inference
-
-  quantization         INT8/FP8 weights + activations
-                       → 4× model size reduction, 2-4× faster
-
-  moe-routing          Optimise expert dispatch (MoE models)
-                       → Linear scaling for trillion-param models
-
-  QUANTUM PASSES
-  ──────────────
-  gate-cancellation    Remove H·H = I, X·X = I, CX·CX = I
-                       → Reduce circuit depth by 15-40%
-
-  rotation-merging     Combine sequential Rz rotations
-                       → Fewer 2-qubit gates (expensive)
-
-  layout-mapping       Map logical → physical qubits (SABRE)
-                       → Minimise SWAP insertions
-
-  error-mitigation     Apply ZNE, PEC, CDR automatically
-                       → Recover 5-20× improvement in fidelity
-
-  HYBRID PASSES
-  ─────────────
-  hybrid-fusion        Merge classical post-processing with
-                       quantum measurement read-out
-                       → Eliminate GPU ↔ QPU round trips
-
-  parameter-tuning     Jointly optimise classical + quantum
-                       parameters via parameter shift rule
-                       → True end-to-end gradients
-```
-
-### Pillar 4: PREDICT
-
-```
-  PREDICTION ENGINE
-  ─────────────────────────────────────────────────────────
-
-  Before ANY hardware execution, LIFT predicts:
-
-  ┌─────────────────────────────────────────────────────┐
-  │  PERFORMANCE PREDICTION (ML-based model)            │
-  │                                                     │
-  │  Latency:     47.3 ms  (±3.2 ms, 95% CI)           │
-  │  Throughput:  1,847 req/s                           │
-  │  GPU memory:  31.4 GB                               │
-  │  GPU util:    87%                                   │
-  └─────────────────────────────────────────────────────┘
-
-  ┌─────────────────────────────────────────────────────┐
-  │  QUANTUM FIDELITY PREDICTION (noise-aware)          │
-  │                                                     │
-  │  Circuit fidelity:  97.3%  (before mitigation)     │
-  │  After ZNE:         99.1%                          │
-  │  Expected shots to reach target: 4,096             │
-  │  Qubit decoherence risk: LOW (depth 24, T2: 100µs) │
-  └─────────────────────────────────────────────────────┘
-
-  ┌─────────────────────────────────────────────────────┐
-  │  BUDGET CHECK                                       │
-  │                                                     │
-  │  Latency:   47ms  ✓  (budget: 100ms)               │
-  │  Fidelity:  99.1% ✓  (budget: 95%)                 │
-  │  Energy:    0.003 kWh ✓ (budget: 0.01 kWh)         │
-  │                                                     │
-  │  ✓ All budgets satisfied. Proceed to execution.     │
-  └─────────────────────────────────────────────────────┘
-```
+**Legend:** ✅ Alpha-stable · 🚧 Active · 📐 Design only
 
 ---
 
-## 8. Implementation Plan
-
-### Phase 0 — Foundations (Weeks 1-4)
-
-```
-  PHASE 0: CORE INFRASTRUCTURE
-  ─────────────────────────────────────────────────────────────
-
-  Week 1-2: LIFT-CORE
-  ┌─────────────────────────────────────────────────────────┐
-  │  • SSA form data structures (Value, Operation, Block)   │
-  │  • Type system (CoreType: Integer, Float, Opaque)       │
-  │  • Module / Function / Region hierarchy                 │
-  │  • Basic lexer and parser (.lif syntax)                 │
-  │  • Visitor pattern for IR traversal                     │
-  │  • Basic IR printer (human-readable output)             │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 3-4: LIFT-CORE passes
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Constant folding pass                                │
-  │  • Dead code elimination pass                           │
-  │  • Canonicalisation pass                               │
-  │  • Type inference                                       │
-  │  • IR validation (well-formedness checker)             │
-  │  • Unit test harness                                    │
-  └─────────────────────────────────────────────────────────┘
-```
-
-### Phase 1 — LIFT-TENSOR (Weeks 5-10)
-
-```
-  PHASE 1: AI DIALECT
-  ─────────────────────────────────────────────────────────────
-
-  Week 5-6: Type System
-  ┌─────────────────────────────────────────────────────────┐
-  │  • TensorType (shape, dtype, layout)                    │
-  │  • AttentionTensor type                                 │
-  │  • KVCache type                                         │
-  │  • SparseTensor type (for MoE)                          │
-  │  • Dimension (Constant, Symbolic, Product)              │
-  │  • DataType (FP32, FP16, BF16, INT8, INT4, FP8)        │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 7-8: Core Operations
-  ┌─────────────────────────────────────────────────────────┐
-  │  • MatMul, Add, Mul, Conv2D                             │
-  │  • ReLU, GELU, SiLU, Softmax                           │
-  │  • LayerNorm, RMSNorm, BatchNorm                        │
-  │  • Attention (Standard, FlashAttention, PagedAttention) │
-  │  • MoE routing                                          │
-  │  • Quantize / Dequantize                                │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 9-10: AI Optimisation Passes
-  ┌─────────────────────────────────────────────────────────┐
-  │  • TensorFusionPass (pattern matching + replacement)    │
-  │  • FlashAttentionPass (O(n²) → tiled)                   │
-  │  • KVCachePass (memory pre-allocation)                  │
-  │  • QuantizationPass (dynamic INT8)                      │
-  │  • ParallelismPass (data / tensor / pipeline)           │
-  └─────────────────────────────────────────────────────────┘
-```
-
-### Phase 2 — LIFT-QUANTUM (Weeks 11-18)
-
-```
-  PHASE 2: QUANTUM DIALECT
-  ─────────────────────────────────────────────────────────────
-
-  Week 11-12: Quantum Type System
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Qubit (logical and physical with T1/T2/frequency)    │
-  │  • ClassicalBit                                         │
-  │  • QuantumState (StateVector, DensityMatrix, MPS)       │
-  │  • Hamiltonian (PauliTerms)                             │
-  │  • NoiseModel (GateError, Decoherence, Crosstalk)       │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 13-14: Gate Operations
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Single-qubit: H, X, Y, Z, S, T, RX, RY, RZ, SX      │
-  │  • Two-qubit: CX, CZ, SWAP, ECR, RZX, XX, YY, ZZ       │
-  │  • Three-qubit: Toffoli, Fredkin                        │
-  │  • Parametrized gates (VQE/QAOA ready)                  │
-  │  • Measure, Reset, Barrier                              │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 15-16: Noise & Error Correction
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Noise model representation (parametric)              │
-  │  • ZNE (Zero Noise Extrapolation) pass                  │
-  │  • PEC (Probabilistic Error Cancellation) pass          │
-  │  • Surface code QEC insertion                           │
-  │  • Readout error mitigation                             │
-  │  • Dynamical decoupling sequences                       │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 17-18: Layout Mapping
-  ┌─────────────────────────────────────────────────────────┐
-  │  • QuantumTopology representation (coupling map)        │
-  │  • SABRE routing algorithm                              │
-  │  • A* layout search                                     │
-  │  • SWAP insertion optimisation                          │
-  │  • Gate decomposition (U3 basis, native gates)          │
-  └─────────────────────────────────────────────────────────┘
-```
-
-### Phase 3 — LIFT-HYBRID (Weeks 19-24)
-
-```
-  PHASE 3: HYBRID FUSION DIALECT
-  ─────────────────────────────────────────────────────────────
-
-  Week 19-20: Encoding Operations
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Amplitude encoding (tensor → superposition)          │
-  │  • Angle encoding (features → rotation angles)          │
-  │  • Basis encoding (integers → computational basis)      │
-  │  • Hamiltonian encoding (data → Pauli terms)            │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 21-22: Hybrid Operations
-  ┌─────────────────────────────────────────────────────────┐
-  │  • ParameterizedQuantumCircuit (VQC, QNN)               │
-  │  • MeasureWithML (post-processing via AI)               │
-  │  • JointOptimisation (classical + quantum params)       │
-  │  • HybridSimulation (GPU-side + QPU-side co-exec)       │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 23-24: Hybrid Passes
-  ┌─────────────────────────────────────────────────────────┐
-  │  • HybridFusionPass                                     │
-  │  • ParameterTuningPass (parameter shift rule)           │
-  │  • EncodingOptimisationPass                             │
-  │  • JointGradientPass                                    │
-  └─────────────────────────────────────────────────────────┘
-```
-
-### Phase 4 — Simulation & Prediction Engine (Weeks 25-30)
-
-```
-  PHASE 4: SIMULATION + PREDICTION
-  ─────────────────────────────────────────────────────────────
-
-  Week 25-26: Static Simulation
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Shape propagation engine                             │
-  │  • FLOP counter (per operation, per module)             │
-  │  • Memory footprint analyser                            │
-  │  • Bandwidth pressure estimator                         │
-  │  • Circuit depth / gate count profiler                  │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 27-28: Quantum Simulation
-  ┌─────────────────────────────────────────────────────────┐
-  │  • State vector simulator (up to 30 qubits, GPU)        │
-  │  • Density matrix simulator (up to 20 qubits)           │
-  │  • MPS tensor network (sparse, up to 100 qubits)        │
-  │  • Monte Carlo noise simulation                         │
-  │  • Fidelity prediction from noise model                 │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 29-30: ML Performance Prediction
-  ┌─────────────────────────────────────────────────────────┐
-  │  • GNN-based latency predictor (train on benchmarks)    │
-  │  • Memory model (analytical + ML correction)            │
-  │  • Energy model (per-op energy table + TDP model)       │
-  │  • Carbon footprint computation                         │
-  │  • Budget satisfaction checker                          │
-  └─────────────────────────────────────────────────────────┘
-```
-
-### Phase 5 — Backends & Interoperability (Weeks 31-38)
-
-```
-  PHASE 5: BACKENDS + ECOSYSTEM BRIDGES
-  ─────────────────────────────────────────────────────────────
-
-  Week 31-32: AI Backends
-  ┌─────────────────────────────────────────────────────────┐
-  │  • CUDA backend (PTX generation, kernel templates)      │
-  │  • LLVM backend (CPU, SIMD vectorisation)               │
-  │  • XLA/StableHLO bridge (for TPU)                       │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 33-34: Quantum Backends
-  ┌─────────────────────────────────────────────────────────┐
-  │  • OpenQASM 3.0 emitter                                 │
-  │  • IBM Qiskit Runtime integration                        │
-  │  • AWS Braket integration                               │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 35-36: Importers
-  ┌─────────────────────────────────────────────────────────┐
-  │  • PyTorch FX graph → LIFT-TENSOR                       │
-  │  • ONNX → LIFT-TENSOR                                   │
-  │  • Qiskit QuantumCircuit → LIFT-QUANTUM                 │
-  │  • OpenQASM 3 → LIFT-QUANTUM                            │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 37-38: .lith Parser
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Full .lith grammar (TOML-like, richer semantics)     │
-  │  • Validation engine (type-safe config)                 │
-  │  • Environment variable substitution                    │
-  │  • Config inheritance (base.lith → project.lith)        │
-  └─────────────────────────────────────────────────────────┘
-```
-
-### Phase 6 — Polish & Production (Weeks 39-48)
-
-```
-  PHASE 6: PRODUCTION READINESS
-  ─────────────────────────────────────────────────────────────
-
-  Week 39-40: CLI Tooling
-  ┌─────────────────────────────────────────────────────────┐
-  │  lift compile <file.lif> --config <project.lith>        │
-  │  lift simulate <file.lif> --report <output.html>        │
-  │  lift predict  <file.lif> --target ibm_kyoto            │
-  │  lift optimise <file.lif> --passes tensor-fusion,zne    │
-  │  lift convert  <model.onnx> --to lift                   │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 41-42: Observability
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Structured JSON logs (tracing crate)                 │
-  │  • Prometheus metrics export (/metrics endpoint)        │
-  │  • Interactive web dashboard (compilation traces)       │
-  │  • Flamegraph profiler integration                      │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 43-44: Auto-Tuning
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Bayesian optimisation (search pass ordering)         │
-  │  • ML-guided pass selection (GNN reward model)          │
-  │  • A/B testing infrastructure (runtime feedback)        │
-  └─────────────────────────────────────────────────────────┘
-
-  Week 45-48: Documentation + Examples
-  ┌─────────────────────────────────────────────────────────┐
-  │  • Full API documentation (rustdoc)                     │
-  │  • Tutorials: LLM inference, VQE, QNN classification   │
-  │  • Benchmark suite (vs PyTorch, Qiskit, raw CUDA)       │
-  │  • Paper draft (arXiv submission)                       │
-  └─────────────────────────────────────────────────────────┘
-```
-
----
-
-## 9. Getting Started
-
-### Prerequisites
+## 10. Getting Started
 
 ```bash
-# Rust toolchain (1.78+)
+# Rust 1.78+
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# CUDA toolkit (for GPU backend, optional)
-# Download from: https://developer.nvidia.com/cuda-downloads
-
-# Python bindings (optional)
-pip install maturin
-```
-
-### Install
-
-```bash
+# Build
 git clone https://github.com/lift-framework/lift
-cd lift
-cargo build --release
+cd lift && cargo build --release
 ```
 
-### Quick Example
+**What you can do today:**
 
 ```bash
-# Write a simple AI programme
+# Write a tensor programme
 cat > hello.lif << 'EOF'
 #dialect tensor
-module @hello {
+module @test {
     func @relu(%x: tensor<4xf32>) -> tensor<4xf32> {
         %out = "tensor.relu"(%x) : (tensor<4xf32>) -> tensor<4xf32>
         return %out
@@ -959,140 +636,73 @@ module @hello {
 }
 EOF
 
-# Simulate it
-lift simulate hello.lif
-
-# Compile to CUDA
-lift compile hello.lif --target cuda --output ./build/
-
-# Predict performance on H100
-lift predict hello.lif --hardware h100
-```
-
-### Directory Structure
-
-```
-lift/
-├── crates/
-│   ├── lift-core/         # SSA form, types, IR structures
-│   ├── lift-tensor/       # AI dialect
-│   ├── lift-quantum/      # Quantum dialect
-│   ├── lift-hybrid/       # Hybrid fusion dialect
-│   ├── lift-sim/          # Simulation engine
-│   ├── lift-predict/      # Performance prediction
-│   ├── lift-opt/          # Optimisation pass pipeline
-│   ├── lift-backend-cuda/ # CUDA code generation
-│   ├── lift-backend-qasm/ # OpenQASM 3 generation
-│   ├── lift-backend-llvm/ # LLVM IR generation
-│   ├── lift-lith/         # .lith config parser
-│   └── lift-cli/          # Command-line interface
-├── tests/                 # Integration tests
-├── benches/               # Benchmarks
-├── examples/              # Example .lif programmes
-└── docs/                  # Documentation
+lift verify  hello.lif     # check well-formedness
+lift analyse hello.lif     # FLOPs, shapes, memory estimate
+lift print   hello.lif     # pretty-print the IR
 ```
 
 ---
 
-## 10. Roadmap
+## 11. Roadmap
+
+Honest timeline: **24 months** to v1.0, not 12. Correct beats fast.
 
 ```
-  TIMELINE
-  ──────────────────────────────────────────────────────────────
-
-  Q1 2025 (Weeks 1-12)    CORE + TENSOR
-  ██████████░░░░░░░░░░    Phase 0 + Phase 1 complete
-  • LIFT-CORE SSA          • LIFT-TENSOR dialect
-  • Parser / printer       • AI optimisation passes
-  • Test harness           • CUDA backend (basic)
-
-  Q2 2025 (Weeks 13-24)   QUANTUM + HYBRID
-  ░░░░░░░░░░██████████░   Phase 2 + Phase 3 complete
-  • LIFT-QUANTUM dialect   • Gate operations + noise
-  • Layout mapping         • LIFT-HYBRID dialect
-  • OpenQASM 3 backend     • Hybrid fusion passes
-
-  Q3 2025 (Weeks 25-36)   SIMULATION + PREDICTION
-  ░░░░░░░░░░░░░░░███████  Phase 4 + partial Phase 5
-  • Static simulation      • Quantum simulator (GPU)
-  • ML perf predictor      • Fidelity prediction
-  • Energy model           • IBM / Qiskit bridge
-
-  Q4 2025 (Weeks 37-48)   PRODUCTION
-  ░░░░░░░░░░░░░░░░░░░███  Phase 5 + Phase 6
-  • Full backends          • .lith parser
-  • Auto-tuning            • CLI tooling
-  • Documentation          • arXiv paper
-  • Benchmarks             • Public release
+  Phase 0  LIFT-CORE         Wk  1–8    DONE        ████████░░░░░░
+  Phase 1  LIFT-TENSOR       Wk  5–18   ACTIVE      ░░░████████░░░
+  Phase 2  LIFT-QUANTUM       Wk 15–32   DESIGN      ░░░░░░░░░░░░░░
+  Phase 3  LIFT-HYBRID        Wk 28–40   FUTURE      ░░░░░░░░░░░░░░
+  Phase 4  SIM + PREDICT      Wk 32–46   FUTURE      ░░░░░░░░░░░░░░
+  Phase 5  BACKENDS+IMPORT    Wk 38–56   FUTURE      ░░░░░░░░░░░░░░
+  Phase 6  TOOLING            Wk 52–62   FUTURE      ░░░░░░░░░░░░░░
+  Phase 7  v1.0 PUBLIC        Wk ~96     Target: Q4 2026
 ```
 
 ---
 
-## 11. Why LIFT Will Win
+## 12. Contributing
 
-### The Timing is Perfect
+| Area | Difficulty | What to build |
+|------|-----------|---------------|
+| Tensor attention passes | Hard | FlashAttention in LIFT-TENSOR |
+| State vector simulator | Medium | Quantum sim CPU + GPU |
+| PyTorch FX importer | Medium | Complete to 100% |
+| Qiskit importer | Medium | Build from scratch |
+| CUDA backend | Hard | PTX generation |
+| .lith parser | Medium | Validation + inheritance |
+| Documentation | Easy | Tutorials + API docs |
 
-```
-  2024-2026: The Era of Hybrid AI+Quantum
-
-  ┌─────────────────────────────────────────────────────────┐
-  │  • IBM claims 1000+ qubit processors by 2025            │
-  │  • Google demonstrates quantum advantage in ML tasks    │
-  │  • AI models reach 10T+ parameters (need new IRs)       │
-  │  • Energy costs of AI become politically critical       │
-  │  • No unified framework exists for hybrid workloads     │
-  │                                                         │
-  │  → The window for LIFT to define the standard is NOW.  │
-  └─────────────────────────────────────────────────────────┘
-```
-
-### The Unfair Advantages
-
-```
-  1. FIRST MOVER in unified AI+QC IR space
-     → Define the standard before anyone else
-
-  2. RUST FOUNDATION
-     → Memory safety, performance, interop with everything
-     → C bindings, Python bindings, WASM — write once
-
-  3. .lith CONFIG LANGUAGE
-     → Lower barrier than MLIR's C++ boilerplate
-     → Researchers adopt tools they can configure easily
-
-  4. SIMULATION-FIRST
-     → Researchers hate surprises on real hardware
-     → LIFT reduces QPU cost by predicting before running
-
-  5. ENERGY AWARENESS
-     → ESG pressure on AI labs is growing fast
-     → LIFT is the only framework with energy budgets built in
-```
-
-### The North Star Metric
-
-> **A quantum machine learning researcher should be able to go from idea to optimised hybrid execution on real hardware in under one hour, using a single .lif file and a single .lith config.**
-
-Today that takes weeks. LIFT makes it an hour.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
-## Contributing
+## 13. Known Limitations
 
-LIFT is in active research-phase development. Contributions are welcome:
+**Hard limits today:**
+- No quantum hardware backend. Quantum support is design-only.
+- No GPU code generation. CUDA backend is planned.
+- Python bindings are not functional yet.
+- GNN performance predictor does not exist yet.
+- Energy and carbon modelling not implemented.
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/my-pass`
-3. Write tests for your changes
-4. Submit a pull request with a clear description
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+**Open design problems:**
+- **Linear types in branches:** Designing the region-based analysis to ensure qubit consumption on all arms. Solution drafted; implementation pending.
+- **Noise composition after fusion:** Using depolarising approximation initially. Full Kraus composition is v1.1.
+- **GNN predictor generalisation:** Will use GNN + analytical model ensemble for robustness.
 
 ---
 
-## Citation
+## 14. Why This Matters
 
-If you use LIFT in academic work, please cite:
+The AI+Quantum convergence is not a hypothetical. IBM targets 1,000+ qubit processors by 2026. Hybrid variational algorithms (VQE, QAOA, QNN) are moving from academic curiosity to industrial application. AI models are hitting scales where classical hardware may need quantum assistance for specific workloads.
+
+**The unified toolchain does not yet exist.** Two ecosystems are forming independently, and if they ossify before being bridged, the cost of unifying them later grows exponentially.
+
+LIFT's bet: the right time to build the bridge is now, with the correct foundations (SSA form, linear qubit types, noise-aware IR, simulation-first), before the toolchain calcifies.
+
+We are not claiming a finished product. We are claiming a correct architecture and an honest plan.
+
+---
 
 ```bibtex
 @software{lift2025,
@@ -1100,16 +710,15 @@ If you use LIFT in academic work, please cite:
   author = {Martial-Christian and Contributors},
   year   = {2025},
   url    = {https://github.com/lift-framework/lift},
-  note   = {A unified IR for AI and Quantum Computing}
+  note   = {Unified IR for AI and Quantum Computing. Research Alpha.}
 }
 ```
 
----
-
-## License
-
-MIT — see [LICENSE](LICENSE) for details.
+**License:** MIT — see [LICENSE](LICENSE).
 
 ---
 
-*LIFT — Because the future of computing is both intelligent and quantum.*
+<div align="center">
+<i>LIFT — Because the future of computation is both intelligent and quantum,
+and it deserves a unified foundation.</i>
+</div>

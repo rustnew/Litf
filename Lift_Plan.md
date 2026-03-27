@@ -1,904 +1,941 @@
 # LIFT — Complete Implementation Plan
 
-**Document Type:** Engineering Roadmap
-**Status:** Living Document
+**Timeline:** 24 months (honest) — not 12
+**Team:** 2 for MVP → 4 for Alpha → 8 for v1.0
+**Start date:** Week 1
+
+This plan incorporates all corrections from the implementation review:
+realistic timelines, realistic team sizing, testing strategy, CI/CD,
+security review, maintenance plan, and Python bindings from Phase 0.
 
 ---
 
-## Overview: 48-Week Plan to First Public Release
+## Timeline Overview
 
 ```
-WEEK  1─────4   PHASE 0: LIFT-CORE
-WEEK  5────10   PHASE 1: LIFT-TENSOR (AI Dialect)
-WEEK 11────18   PHASE 2: LIFT-QUANTUM (Quantum Dialect)
-WEEK 19────24   PHASE 3: LIFT-HYBRID (Fusion Dialect)
-WEEK 25────30   PHASE 4: Simulation + Prediction Engine
-WEEK 31────38   PHASE 5: Backends + Interoperability
-WEEK 39────44   PHASE 6: Tooling + Observability
-WEEK 45────48   PHASE 7: Documentation + Public Release
+  Months  1–2    Phase 0: LIFT-CORE + Python scaffold
+  Months  2–5    Phase 1: LIFT-TENSOR (AI dialect)
+  Months  4–9    Phase 2: LIFT-QUANTUM (Quantum dialect, two sub-phases)
+  Months  8–12   Phase 3: LIFT-HYBRID (Fusion dialect)
+  Months  10–14  Phase 4: Simulation + Prediction engine
+  Months  12–18  Phase 5: Backends + Importers
+  Months  16–21  Phase 6: Tooling + Observability
+  Months  20–24  Phase 7: Documentation + Public v1.0
+```
+
+Phases 1–7 **overlap** intentionally: backend work can begin as soon as the
+dialect is alpha-stable, and prediction training data collection starts in
+Phase 1 even though the model is not trained until Phase 4.
+
+---
+
+## Team Plan
+
+```
+  Months  1–6   (MVP Phase)   2 engineers
+    Engineer A: compiler (Core, passes, AST, LLVM backend)
+    Engineer B: AI+Quantum (Tensor dialect, Quantum dialect design)
+
+  Months  6–14  (Alpha Phase)  4 engineers
+    + Engineer C: ML / prediction engine + benchmarks
+    + Engineer D: infrastructure (CI/CD, Python bindings, CLI)
+
+  Months  14–24 (Release Phase) 8 engineers
+    + Engineer E: quantum (noise models, QPU backends, ZNE)
+    + Engineer F: hybrid dialect + joint gradient
+    + Engineer G: documentation, tutorials, community
+    + Engineer H: security review, performance, deployment
 ```
 
 ---
 
-## Phase 0: LIFT-CORE (Weeks 1–4)
+## Phase 0: LIFT-CORE (Weeks 1–8)
 
-### Milestone 0.1 — IR Data Structures (Week 1–2)
+**Goal:** A correct, well-tested SSA IR that all dialects can build on.
+**Team:** 2 engineers.
 
-**Goal:** All core data structures compile and basic IR can be constructed in memory.
+### Milestone 0.1 — IR Data Structures (Weeks 1–3)
 
-**Tasks:**
 ```
-[ ] Context struct (generational arena for all IR objects)
-[ ] Value struct (ID + type + name)
-[ ] CoreType enum (Integer, Float, Boolean, Tuple, Function, Opaque, Void)
-[ ] Attribute struct (key-value store for compile-time constants)
-[ ] Location struct (file, line, column for debug info)
-[ ] Operation struct (name, dialect, inputs, outputs, attributes, location)
-[ ] Block struct (ID, operations list, block arguments)
-[ ] Region struct (blocks list, entry block pointer)
-[ ] Function struct (name, signature, region)
-[ ] Module struct (name, functions, globals, dialect registry)
+[ ] Context (SlotMap-based arena for all IR objects)
+[ ] ValueData (TypeId + name + DefSite)
+[ ] OperationData (name, dialect, inputs, results, attrs, regions, location)
+[ ] BlockData (operations list + block arguments)
+[ ] RegionData (blocks list + entry block)
+[ ] FunctionData (name + signature + region)
+[ ] ModuleData (name + functions + globals + dialect registry)
+[ ] TypeInterner (deduplication: structural equality = pointer equality)
+[ ] StringInterner (deduplicated string storage)
+[ ] Attributes (typed key-value map for compile-time constants)
+[ ] Location (file + line + column, for error messages)
 ```
 
-**Test criteria:**
-- Can construct a simple module with a function containing 3 operations
-- Can print the module to a string in human-readable form
-- Valgrind / ASAN shows no memory errors
-- No panics on valid inputs
-
-**Estimated time:** 2 developers × 2 weeks
+**Acceptance criteria:**
+- Can construct a 3-operation module in memory
+- All objects have O(1) lookup by key
+- Valgrind / ASAN: no memory errors on 100 random programmes
+- No panics on valid inputs (checked with cargo test + proptest)
 
 ---
 
-### Milestone 0.2 — Parser and Printer (Week 2–3)
+### Milestone 0.2 — Parser and Printer (Weeks 2–5)
 
-**Goal:** Round-trip: `.lif` text → IR → `.lif` text produces identical output.
-
-**Tasks:**
 ```
-[ ] Lexer (tokenise .lif source files)
-      Tokens: identifiers, numbers, strings, punctuation, keywords
-[ ] Parser (recursive descent, produce AST)
-      module, func, block, operation, value, type, attribute
-[ ] AST → IR builder (convert parse tree to LIFT IR)
-[ ] IR Printer (emit human-readable .lif text from IR)
+[ ] Lexer  (hand-written, not generated — simpler, better errors)
+      Tokens: ident, integer, float, string, punctuation, keywords
+      Error recovery: continue after bad token, collect all errors
+[ ] Parser (recursive descent)
+      module, func, block, operation, type, value, attribute
+[ ] AST → IR Builder
+[ ] IR Printer (human-readable .lif text from IR)
 [ ] Round-trip test: parse → build → print → re-parse → compare
-[ ] Error recovery: parser continues after errors, collects all errors
+[ ] Error messages: file + line + column + suggestion
 ```
 
-**Grammar (subset):**
-```
-module   ::= 'module' '@' ident '{' function* '}'
-function ::= 'func' '@' ident '(' arg-list ')' '->' type-list '{' block+ '}'
-block    ::= '^' ident '(' arg-list ')' ':' operation*
-operation::= ('%' ident (',' '%' ident)* '=')? string '(' value-list ')' 
-             ('{' attr-list '}')? ':' type-list '->' type-list
-```
-
-**Test criteria:**
-- 20 hand-written .lif files parse without errors
-- Round-trip test passes for all 20 files
-- Error messages include file, line, column
+**Acceptance criteria:**
+- 30 hand-written .lif files parse without errors
+- Round-trip test passes for all 30 files
+- Every error message has a line number
 
 ---
 
-### Milestone 0.3 — Core Passes (Week 3–4)
+### Milestone 0.3 — Core Passes + Verifier (Weeks 4–7)
 
-**Goal:** A pass pipeline can be constructed, run, and verified.
-
-**Tasks:**
 ```
-[ ] Pass trait definition (name, run, is_applicable, invalidates)
-[ ] PassManager (sequential pass runner with analysis cache)
-[ ] ConstantFoldingPass (eval ops on constant inputs at compile time)
-[ ] DeadCodeEliminationPass (remove unreachable ops and functions)
-[ ] CanonicalisationPass (normalise IR patterns to canonical form)
-[ ] IR Verifier (check well-formedness: SSA, types, block dominance)
-[ ] Unit test framework (compare IR before/after each pass)
+[ ] IR Verifier
+      SSA property (every value defined once)
+      Dominance (uses dominated by defs)
+      Type consistency (inputs/outputs match declared types)
+      Well-formedness (no dangling SlotMap keys)
+[ ] ConstantFoldingPass
+      Evaluate ops on constant inputs at compile time
+[ ] DeadCodeEliminationPass
+      Remove unreachable ops and functions
+[ ] CanonicalisationPass
+      Normalise IR patterns (e.g., add(x, 0) → x)
+[ ] PassManager
+      Sequential pass runner with analysis cache
+      Budget-aware rollback (from design doc Section 7.3)
 ```
 
-**Test criteria:**
-- Each pass has ≥ 10 unit tests
-- IR verifier catches all malformed IRs in the test suite
-- PassManager runs without panics on all test modules
+**Acceptance criteria:**
+- Verifier catches all malformed IRs in test suite (20+ bad IRs)
+- Each pass has ≥ 15 unit tests
+- PassManager runs without panic on 100 random modules
 
 ---
 
-## Phase 1: LIFT-TENSOR (Weeks 5–10)
+### Milestone 0.4 — Python Bindings Scaffold (Week 6–8)
 
-### Milestone 1.1 — Tensor Type System (Week 5–6)
+**This is done in Phase 0, not deferred. Researchers use Python.**
 
-**Goal:** All tensor types can be expressed and type-checked.
+```
+[ ] PyO3 crate setup (lift-python)
+[ ] Maturin build configuration
+[ ] Python stubs (.pyi) for type checkers
+[ ] Expose: Context, Module, Function, Operation (read-only)
+[ ] Expose: lift.parse(source: str) -> Module
+[ ] Expose: lift.verify(module: Module) -> bool
+[ ] Expose: lift.print(module: Module) -> str
+[ ] Expose: lift.analyse(module: Module) -> AnalysisReport
+[ ] pip install lift works (wheel published to TestPyPI)
+```
 
-**Tasks:**
+**Acceptance criteria:**
+- `import lift; m = lift.parse("..."); lift.verify(m)` works in Python
+- Type stubs pass mypy --strict
+
+---
+
+### Milestone 0.5 — C API (Week 7–8)
+
+```
+[ ] lift.h public header
+[ ] lift_context_new / lift_context_free
+[ ] lift_parse(ctx, source, len) -> Module*
+[ ] lift_module_free(module)
+[ ] lift_verify(module) -> int
+[ ] lift_print(module) -> char*   // caller frees
+[ ] lift_analyse_json(module) -> char*  // caller frees
+[ ] Valgrind test: no leaks through C API
+```
+
+---
+
+## Phase 1: LIFT-TENSOR (Weeks 5–18)
+
+**Goal:** A correct, optimisable AI dialect with a working LLVM CPU backend.
+**Team:** 2 engineers.
+
+### Milestone 1.1 — Tensor Type System (Weeks 5–8)
+
 ```
 [ ] TensorType (shape: Vec<Dimension>, dtype: DataType, layout: MemoryLayout)
-[ ] AttentionTensor type (batch, seq_len, num_heads, head_dim, dtype)
-[ ] KVCache type (max_seq, num_heads, head_dim, dtype, is_paged)
-[ ] SparseTensor type (num_experts, capacity, dtype)
-[ ] Dimension enum (Constant, Symbolic, Product)
-[ ] DataType enum (FP32, FP16, BF16, FP8_E4M3, FP8_E5M2, INT8, INT4, INT2)
-[ ] MemoryLayout enum (Contiguous, NCHW, NHWC, Strided, Tiled, Blocked)
-[ ] Type printer (e.g., "tensor<1x32x128xf16>")
-[ ] Type parser (parse type expressions from .lif text)
-[ ] Shape inference rules (per-operation shape propagation)
+[ ] AttentionTensor (batch, seq_len, num_heads, head_dim, dtype)
+[ ] KVCache (max_seq, num_heads, head_dim, dtype, is_paged)
+[ ] SparseTensor (num_experts, capacity, dtype) — for MoE
+[ ] Dimension enum (Constant(n), Symbolic(String), Product)
+[ ] DataType (FP64, FP32, FP16, BF16, FP8_E4M3, FP8_E5M2, INT8, INT4)
+[ ] MemoryLayout (Contiguous, NCHW, NHWC, Strided, Tiled)
+[ ] Shape inference rules for every operation (mandatory)
+[ ] Type printer: tensor<1x32x128xf16>
+[ ] Type parser: parse type from .lif text
+[ ] Unit tests: 20+ type system tests
 ```
 
 ---
 
-### Milestone 1.2 — Core AI Operations (Week 6–7)
+### Milestone 1.2 — Core AI Operations (Weeks 7–11)
 
-**Tasks:**
 ```
-[ ] tensor.add, tensor.mul, tensor.sub, tensor.div
-[ ] tensor.matmul (with transpose flags)
-[ ] tensor.conv2d (stride, padding, dilation, groups)
+ARITHMETIC
+[ ] tensor.add, tensor.mul, tensor.sub, tensor.div, tensor.neg
+[ ] tensor.matmul {transpose_lhs, transpose_rhs}
+[ ] tensor.linear (%x, %W, %b) — fused matmul+bias
+[ ] tensor.conv2d {stride, padding, dilation, groups}
+[ ] tensor.embedding — lookup table
+
+ACTIVATIONS
 [ ] tensor.relu, tensor.gelu, tensor.silu, tensor.sigmoid
-[ ] tensor.softmax (with dim attribute)
-[ ] tensor.layer_norm, tensor.rms_norm, tensor.batch_norm
-[ ] tensor.embedding (lookup table)
+[ ] tensor.softmax {dim}
+
+NORMALISATION
+[ ] tensor.layernorm {eps}
+[ ] tensor.rmsnorm {eps}
+[ ] tensor.batchnorm
+
+SHAPE
 [ ] tensor.reshape, tensor.transpose, tensor.concat, tensor.split
+[ ] tensor.gather, tensor.scatter
+
+CONSTANTS
 [ ] tensor.constant (compile-time tensor values)
-[ ] tensor.linear (matmul + bias, fused)
-```
+[ ] tensor.zeros, tensor.ones
 
-Each operation implements:
-- Shape inference (what is the output shape given input shapes?)
-- Type checking (are input types valid?)
-- FLOP counting (how many FLOPs does this operation perform?)
-- Memory footprint (how much memory does this operation require?)
+For each operation, implement:
+  (a) shape inference
+  (b) type checking
+  (c) FLOP count formula
+  (d) memory footprint (bytes allocated)
+  (e) pretty printer
+  (f) parser
+  (g) ≥ 10 unit tests
+```
 
 ---
 
-### Milestone 1.3 — Attention and LLM Operations (Week 7–8)
+### Milestone 1.3 — Attention and LLM Operations (Weeks 10–14)
 
-**Tasks:**
 ```
-[ ] tensor.attention {implementation, causal, scale, mask}
-      Implementation variants: Standard, FlashAttentionV2, FlashAttentionV3, SDPA
-[ ] tensor.paged_attention {block_tables, context_len, ...}
-      For vLLM-style inference
+[ ] tensor.attention {implementation, causal, scale}
+      Implementations: Standard, FlashAttentionV2, FlashAttentionV3, SDPA
+[ ] tensor.paged_attention {block_tables, context_len, num_heads, head_dim}
 [ ] tensor.moe_dispatch {num_experts, num_active, capacity}
-[ ] tensor.moe_combine (reverse of dispatch)
-[ ] tensor.speculative_decode {draft_model, target_model, k}
-[ ] tensor.quantize {quant_type, per_channel, symmetric}
+[ ] tensor.moe_combine
+[ ] tensor.quantize {quant_type, calibration, per_channel}
 [ ] tensor.dequantize {original_type}
-[ ] tensor.fused_op {pattern, inputs, outputs}
-[ ] Gradient operations (tensor.grad_matmul, tensor.grad_relu, ...)
-[ ] tensor.checkpoint {fn, inputs} (recomputation checkpoint)
+[ ] tensor.checkpoint {fn} — gradient recomputation boundary
+[ ] tensor.offload {location, prefetch} — CPU/SSD offloading
+[ ] Gradient operations for all above
 ```
 
 ---
 
-### Milestone 1.4 — AI Optimisation Passes (Week 8–10)
+### Milestone 1.4 — AI Optimisation Passes (Weeks 12–17)
 
-**Tasks:**
 ```
 [ ] TensorFusionPass
-      - Pattern library: MatMul+Bias+Act, Conv+BN+ReLU, etc.
-      - Subgraph isomorphism matching (Ullmann algorithm)
-      - Profitability analysis (only fuse if it reduces memory or latency)
+      Declarative pattern library (≥ 10 patterns)
+      Topological matching — O(V+E×P) not Ullmann
+      Profitability check: only fuse if single_use(intermediates)
+      Unit tests: 15+ tests including negative cases (should not fuse)
 
 [ ] FlashAttentionPass
-      - Detect tensor.attention {implementation=Standard}
-      - Check applicability conditions (seq_len threshold, hardware)
-      - Replace with flash_attention variant
+      Detect tensor.attention {implementation=Standard}
+      Applicability: seq_len > 512 AND GPU target
+      Replace with FlashAttentionV2 or V3 based on arch
 
 [ ] KVCachePass
-      - Detect attention patterns in inference mode
-      - Insert KVCache type annotations
-      - Transform to tensor.paged_attention when profitable
+      Detect attention in inference mode (no grad)
+      Insert paged attention + KV cache allocation
 
 [ ] QuantizationPass
-      - Dynamic INT8 (calibration at runtime)
-      - Static INT8 (calibration from provided dataset)
-      - FP8 (H100 / A100 with appropriate flags)
-      - Per-channel vs per-tensor
+      Dynamic INT8 (default)
+      Static INT8 (requires calibration_dataset in .lith)
+      FP8 (requires sm_90 or higher)
+      Per-channel or per-tensor
 
 [ ] ParallelismPass
-      - Detect data-parallelism opportunities
-      - Insert tensor.parallel_split / tensor.parallel_reduce
-      - Annotate with parallelism strategy (DP/TP/PP)
+      Data parallel: replicate model, split batch
+      Tensor parallel: split weight matrices
+      Pipeline parallel: partition layers across stages
+      Insert explicit split/allreduce/send/receive operations
 
 [ ] MemoryPlanningPass
-      - Liveness analysis
-      - Buffer reuse (assign non-overlapping lifetimes to same memory)
-      - Memory pooling
+      Liveness analysis
+      Buffer reuse (non-overlapping lifetimes share allocation)
+      Memory pool creation
 ```
 
-**Test criteria for each pass:**
-- At least 15 unit tests
-- At least 3 end-to-end tests (real-world model fragment)
-- Performance regression tests (pass must not degrade performance on reference models)
+**Correctness validation for every pass:**
+Run all 5,000 reference programmes through the pass.
+Compare outputs before/after within 1e-5 tolerance (FP32).
 
 ---
 
-## Phase 2: LIFT-QUANTUM (Weeks 11–18)
+### Milestone 1.5 — LLVM CPU Backend (Weeks 14–18)
 
-### Milestone 2.1 — Quantum Type System (Week 11–12)
-
-**Tasks:**
 ```
-[ ] Qubit type (logical, linear — can only be used once)
-[ ] PhysicalQubit type (id, T1, T2, frequency, gate_fidelity)
+[ ] LLVM IR emitter for all tensor ops
+[ ] AVX-512 SIMD hints for contiguous tensor ops
+[ ] OpenMP pragmas for element-wise ops
+[ ] cuBLAS calls for MatMul (when CUDA feature enabled)
+[ ] Linker configuration
+[ ] Shared library (.so) and executable output
+[ ] Compile and run a complete ResNet-50 inference step
+```
+
+**Phase 1 acceptance test:**
+LLaMA 7B single-token inference compiles (CPU backend) and produces
+correct output (within 1e-4 of PyTorch baseline) in < 10 minutes of
+compilation time.
+
+---
+
+## Phase 2: LIFT-QUANTUM (Weeks 15–36)
+
+**Sub-phases due to complexity. Each builds on the previous.**
+
+### Phase 2a: Basic Quantum (Weeks 15–24)
+
+#### Milestone 2a.1 — Quantum Types (Weeks 15–18)
+
+```
+[ ] Qubit type (linear — consumed exactly once)
+[ ] PhysicalQubit type (id, T1, T2, freq, fidelity)
 [ ] ClassicalBit type
-[ ] QuantumState type (dimension, representation: SV / DM / MPS / Stabiliser)
+[ ] QuantumState type (StateVector, DensityMatrix, MPS, Stabiliser)
 [ ] Hamiltonian type (Vec<PauliTerm>)
-[ ] PauliTerm struct (coefficient: Complex<f64>, paulis: Vec<(qubit_id, Pauli)>)
+[ ] PauliTerm (Complex<f64> coeff + Vec<(qubit_id, Pauli)>)
 [ ] Pauli enum (I, X, Y, Z)
-[ ] NoiseModel struct (gate_errors, T1, T2, crosstalk, readout_error)
-[ ] GateError struct (probability, type, coherent)
-[ ] QuantumTopology struct (coupling_map, gate_fidelity, gate_time)
-[ ] Qubit linearity checker (verifier pass: no qubit used twice)
+[ ] NoiseModel (gate_errors, T1, T2, crosstalk, readout)
+
+LINEARITY CHECKER (integrated into verifier)
+[ ] Track consumed: HashSet<ValueKey> per block
+[ ] Report error if qubit key appears twice as input
+[ ] Report error if a branch arm does not consume the same qubits
+    as the other arm
+[ ] Unit tests: 20 linearity tests (10 valid, 10 invalid)
 ```
 
----
+#### Milestone 2a.2 — Gate Operations (Weeks 17–21)
 
-### Milestone 2.2 — Gate Operations (Week 12–13)
-
-**Tasks:**
 ```
-[ ] Single-qubit gates: H, X, Y, Z, S, Sdg, T, Tdg, SX, SXdg
-[ ] Rotation gates: RX(θ), RY(θ), RZ(θ), P(λ), U1(λ), U2(φ,λ), U3(θ,φ,λ)
-[ ] Two-qubit gates: CX, CZ, CY, SWAP, iSWAP, ECR, RZX(θ), XX(θ), YY(θ), ZZ(θ)
-[ ] Three-qubit gates: Toffoli (CCX), Fredkin (CSWAP)
-[ ] Parametrised gate (gate_type, qubits, parameters: Vec<Value>)
-[ ] quantum.measure {basis} → ClassicalBit
-[ ] quantum.measure_all → tensor<n×bit>
-[ ] quantum.reset
-[ ] quantum.barrier {qubits} (prevent optimisation across barrier)
-[ ] quantum.delay {duration, unit} (explicit idle time)
-[ ] quantum.init {num_qubits} → qubit×n
+SINGLE-QUBIT GATES
+[ ] quantum.h, quantum.x, quantum.y, quantum.z
+[ ] quantum.s, quantum.sdg, quantum.t, quantum.tdg, quantum.sx
+[ ] quantum.rx(θ), quantum.ry(θ), quantum.rz(θ)
+[ ] quantum.u1(λ), quantum.u2(φ,λ), quantum.u3(θ,φ,λ)
+
+TWO-QUBIT GATES
+[ ] quantum.cx, quantum.cz, quantum.cy, quantum.swap
+[ ] quantum.iswap, quantum.ecr
+[ ] quantum.rzx(θ), quantum.xx(θ), quantum.yy(θ), quantum.zz(θ)
+
+THREE-QUBIT GATES
+[ ] quantum.ccx (Toffoli)
+[ ] quantum.cswap (Fredkin)
+
+MEASUREMENT AND CONTROL
+[ ] quantum.measure {basis} (%q: qubit) -> bit
+[ ] quantum.measure_all (%q0,...,%qn) -> tensor<n×bit>
+[ ] quantum.reset (%q: qubit) -> qubit
+[ ] quantum.barrier (no-optimise fence)
+[ ] quantum.delay {duration, unit}
+[ ] quantum.init () -> qubit
+
+PARAMETRISED GATE
+[ ] quantum.param_gate {type, qubits, params}
+    For VQE/QAOA trainable circuits.
 ```
 
----
+#### Milestone 2a.3 — State Vector Simulator (Weeks 20–24)
 
-### Milestone 2.3 — Noise Modelling (Week 13–14)
-
-**Tasks:**
 ```
-[ ] NoiseModel parser (from JSON calibration files)
-[ ] IBM device calibration loader (from IBM Quantum API)
+[ ] CPU state vector (up to 28 qubits, exact)
+      Complex<f64> vector of size 2^n
+      Gate application as sparse matrix multiply
+      Measurement as projection + normalisation + sample
+      
+[ ] GPU state vector (up to 35 qubits, via cuStateVec if available)
+      Fallback to CPU if CUDA not present
+      
+[ ] OpenQASM 3 backend (basic)
+      Emit all gates as OpenQASM 3 statements
+      IBM basis set decomposition {RZ, SX, X, CX}
+      Rigetti basis set decomposition {RZ, RX, CZ}
+```
+
+### Phase 2b: Advanced Quantum (Weeks 22–36)
+
+#### Milestone 2b.1 — Noise Models and Density Matrix (Weeks 22–27)
+
+```
+[ ] IBM device calibration loader (JSON from IBM Quantum API)
 [ ] Rigetti device calibration loader
-[ ] Depolarising noise channel representation
-[ ] Amplitude damping channel representation
-[ ] Phase damping channel representation
-[ ] Pauli error channel representation
-[ ] Crosstalk model (ZZ coupling between neighbouring qubits)
+[ ] Depolarising channel representation
+[ ] Amplitude damping channel
+[ ] Pauli error channel
+[ ] Crosstalk model (ZZ coupling between neighbours)
 [ ] Readout error matrix
-[ ] Noise-annotated gate operations (gate + noise channel combined)
-[ ] Noise propagation analysis (how noise accumulates through circuit)
+[ ] Noise propagation analysis (accumulated error through circuit)
+[ ] Density matrix simulator (up to 20 qubits) — includes noise
+[ ] MPS tensor network simulator (up to 100 qubits, low entanglement)
+[ ] Monte Carlo noise simulation (trajectory sampling)
+[ ] Fidelity estimation from noise model
 ```
 
----
+#### Milestone 2b.2 — Layout Mapping and Quantum Passes (Weeks 26–33)
 
-### Milestone 2.4 — Error Mitigation Passes (Week 14–15)
-
-**Tasks:**
 ```
-[ ] ZNE (Zero Noise Extrapolation) pass
-      - Gate folding (replace G → G G† G for 3× noise scaling)
-      - Pulse stretching (scale gate duration, requires pulse-level access)
-      - Richardson extrapolation to zero noise
-      - Automatic order selection based on circuit depth / noise
+[ ] QuantumTopology (coupling map + gate fidelity + gate time per pair)
+[ ] SABRE routing algorithm
+      Standard SABRE (depth-minimising)
+      Noise-aware SABRE (fidelity-weighted scoring)
+[ ] A* exact routing (for small circuits, ≤ 10 qubits)
+[ ] SWAP insertion verification (simulate before+after, compare)
 
-[ ] PEC (Probabilistic Error Cancellation) pass
-      - Compute quasi-probability decomposition of noisy gates
-      - Insert sampling overhead estimation
-      - Annotate with overhead factor
-
-[ ] ReadoutErrorMitigation pass
-      - Insert all-zeros / all-ones calibration circuits
-      - Compute correction matrix
-      - Apply matrix inversion to measurement results
-
-[ ] DynamicalDecoupling pass
-      - Identify idle periods in the circuit
-      - Insert XY-4, CPMG, or UR sequences
-      - Respect hardware timing constraints
-```
-
----
-
-### Milestone 2.5 — Layout Mapping (Week 15–17)
-
-**Tasks:**
-```
-[ ] QuantumTopology loader (from device specification)
-[ ] Trivial layout (identity mapping, no SWAP)
-[ ] SABRE layout mapping
-      - Front layer computation
-      - SWAP scoring heuristic
-      - Bidirectional search
-      - Noise-aware variant (prefer high-fidelity qubit pairs)
-
-[ ] A* layout search (for small circuits, exact minimum SWAP)
-[ ] SWAP insertion verification (circuit preserves semantics after mapping)
-[ ] Layout mapping statistics (SWAP count, circuit depth increase, fidelity estimate)
-```
-
----
-
-### Milestone 2.6 — Gate Optimisation Passes (Week 17–18)
-
-**Tasks:**
-```
 [ ] GateCancellationPass
-      - Algebraic identities: H·H=I, X·X=I, CX·CX=I
-      - Commutation table for reordering
-      - Peephole window optimisation
+      Algebraic identities + commutation table
+      Peephole window
 
 [ ] RotationMergingPass
-      - Merge consecutive same-axis rotations: Rz(a)·Rz(b) = Rz(a+b)
-      - Handle phase wrapping (angles modulo 2π)
+      Rz(a)·Rz(b) = Rz(a+b), with angle wrapping
 
 [ ] GateDecompositionPass
-      - Decompose non-native gates to hardware basis
-      - IBM basis: {U, CX}, {RZ, SX, X, CX}, {RZ, X, SX, CX, CZ, ECR}
-      - Rigetti basis: {RZ, RX, CZ}
-      - Solovay-Kitaev approximation for arbitrary unitaries
+      Decompose to hardware-native basis sets
+      IBM, Rigetti, IonQ basis sets
 
 [ ] TwoQubitWeylDecompositionPass
-      - Exact decomposition of arbitrary 2-qubit unitaries
-      - Cartan (KAK) decomposition
-      - Reduce to at most 3 CNOT gates
+      Cartan (KAK) decomposition — any 2Q unitary → ≤ 3 CX gates
+```
 
-[ ] TemplateMatchingPass
-      - Library of circuit templates with known optimised equivalents
-      - Subgraph matching and replacement
+#### Milestone 2b.3 — Error Mitigation Passes (Weeks 30–36)
+
+```
+[ ] ZNE pass (Zero Noise Extrapolation)
+      Gate folding: G → G G† G (3× noise factor)
+      Richardson extrapolation (linear, quadratic, order-3)
+      Auto-order selection based on circuit depth
+      R² validation: warn if extrapolation fit quality < 0.95
+
+[ ] Readout error mitigation pass
+      Insert calibration circuits (all-zeros, all-ones)
+      Compute correction matrix
+      Apply matrix inversion to results
+
+[ ] Dynamical Decoupling pass
+      Detect idle periods on qubits
+      Insert XY-4 sequences when idle > T2/10
+      Respect hardware timing constraints
+
+[ ] QEC code insertion (basic, surface code) — v1.1, not v1.0
 ```
 
 ---
 
-## Phase 3: LIFT-HYBRID (Weeks 19–24)
+## Phase 3: LIFT-HYBRID (Weeks 28–42)
 
-### Milestone 3.1 — Encoding Operations (Week 19–20)
+### Milestone 3.1 — Encoding Operations (Weeks 28–33)
 
-**Tasks:**
 ```
-[ ] hybrid.amplitude_encode
-      - Input: tensor<N×f32>, Output: log₂(N) qubits
-      - Normalisation (automatic if normalize=true)
-      - Gate decomposition to initialise state vector
+[ ] hybrid.amplitude_encode {normalize}
+      tensor<N×f32> → log₂(N) qubits
+      Decompose into gate sequence to initialise state
 
-[ ] hybrid.angle_encode
-      - Input: tensor<N×f32>, Output: N qubits
-      - Rotation gate selection (RX, RY, RZ)
-      - Domain mapping (arbitrary float → [0, 2π])
+[ ] hybrid.angle_encode {gate}
+      tensor<N×f32> → N qubits
+      Domain mapping: arbitrary float → [0, 2π]
 
 [ ] hybrid.basis_encode
-      - Input: tensor<N×i32>, Output: N qubits
-      - Binary encoding of integers
+      tensor<N×i32> → N qubits
 
 [ ] hybrid.hamiltonian_encode
-      - Input: tensor<K×f32> (coefficients), Output: Hamiltonian
-      - Assign coefficients to Pauli terms
+      tensor<K×f32> + Pauli structure → Hamiltonian value
 
 [ ] hybrid.decode (measurement → classical tensor)
-      - Expectation value computation
-      - Sampling statistics
-      - Quantum state tomography (for small circuits)
+      Expectation value computation
+      Sampling statistics
 ```
 
----
+### Milestone 3.2 — Hybrid Operations (Weeks 32–39)
 
-### Milestone 3.2 — Hybrid Operations (Week 20–22)
-
-**Tasks:**
 ```
-[ ] hybrid.parameterized_circuit
-      - Classical network generates gate parameters
-      - Circuit is a LIFT-QUANTUM function
-      - Gradient flows through parameter shift rule
+[ ] hybrid.angle_encode_forward
+      Combined angle encode + parameterised circuit execution
+      Most common QNN pattern
 
 [ ] hybrid.measure_with_ml
-      - Quantum measurement results fed into classical network
-      - Useful for classification (quantum feature map → classical classifier)
+      Quantum measurement → classical ML post-processing
+
+[ ] hybrid.parameter_shift_gradient
+      Compute dE/dθ for all circuit parameters using parameter shift
+      Batch 2P circuit evaluations
 
 [ ] hybrid.joint_optimisation
-      - Combined classical + quantum parameter optimisation
-      - Supports Adam, COBYLA, SPSA optimisers
-      - Handles parameter shift for quantum gradients
+      Classical + quantum params, single optimizer step
+      Supports Adam, COBYLA, SPSA
 
-[ ] hybrid.cosimulation
-      - Explicit split: classical part runs on GPU, quantum part on QPU (or simulator)
-      - Interface management (data transfer, synchronisation)
-      - Pipelining (overlapping classical and quantum execution)
+[ ] hybrid.cosimulation {interface}
+      GPU-side + QPU-side co-execution
+      Synchronisation and data transfer management
 ```
 
----
+### Milestone 3.3 — Hybrid Optimisation Passes (Weeks 37–42)
 
-### Milestone 3.3 — Hybrid Optimisation Passes (Week 22–24)
-
-**Tasks:**
 ```
 [ ] HybridFusionPass
-      - Fuse consecutive classical operations with quantum encoding
-      - Fuse quantum measurement with classical post-processing
-      - Eliminate redundant encoding/decoding pairs
+      Fuse classical post-processing with quantum measurement
+      Eliminate GPU ↔ QPU round-trips
 
 [ ] ParameterShiftPass
-      - Transform hybrid.joint_optimisation into explicit parameter shift evaluations
-      - Batch the 2P circuit evaluations required for P parameters
+      Expand hybrid.parameter_shift_gradient into explicit
+      2P forward evaluations
 
 [ ] EncodingOptimisationPass
-      - Select encoding strategy based on circuit depth budget
-      - Trade qubit count for circuit depth (amplitude vs angle)
+      Select encoding based on circuit depth budget
+      Amplitude vs angle encoding tradeoff
 
 [ ] ShotOptimisationPass
-      - Compute minimum shots needed for given statistical precision
-      - Reuse shots across repeated measurements on same circuit
+      Minimum shots for target statistical precision
+      Reuse shots across repeated measurements
 ```
 
 ---
 
-## Phase 4: Simulation + Prediction Engine (Weeks 25–30)
+## Phase 4: Simulation + Prediction Engine (Weeks 32–46)
 
-### Milestone 4.1 — Static Analysis Engine (Week 25–26)
+### Milestone 4.1 — Static Analysis Engine (Weeks 32–37)
 
-**Tasks:**
 ```
-[ ] Shape propagation (propagate shapes through all operations)
-[ ] Type inference (fill in missing types from context)
-[ ] FLOP counter (per-operation FLOP formulae)
-[ ] Memory footprint analyser
-      - Tensor allocation sizes
-      - Peak memory (liveness-based)
-      - Memory reuse opportunities
-
+[ ] Full shape propagation (all tensor ops)
+[ ] Full FLOP counter (per-op formulae, per-module total)
+[ ] Memory liveness analysis (peak memory computation)
 [ ] Bandwidth pressure estimator
-      - Memory reads + writes per operation
-      - Cache locality analysis
+[ ] Circuit analyser: depth, gate counts by type, T1/T2 risk
+[ ] Energy model (per-op energy table × count)
+[ ] Carbon estimate (energy × grid intensity, configurable region)
+[ ] HTML + JSON simulation report generator
+```
 
-[ ] Circuit analyser (quantum)
-      - Gate count by type
-      - Circuit depth (critical path)
-      - Two-qubit gate count (most expensive)
-      - Expected T1/T2 decoherence contribution
+### Milestone 4.2 — GNN Prediction Model (Weeks 35–44)
 
-[ ] Static report generator (HTML + JSON output)
+```
+DATA COLLECTION (start in Phase 1, run continuously)
+[ ] Benchmark runner: 200+ programmes × 5+ hardware configs
+[ ] Trace format: (IR graph JSON, hw_spec JSON, latency_ms, memory_gb)
+[ ] Initial dataset target: 50K examples before model training
+
+MODEL (Weeks 38–42)
+[ ] Computation graph extractor (IR → node/edge feature matrices)
+[ ] GNN architecture:
+      NodeEncoder Linear(node_feat_dim → 128)
+      EdgeEncoder Linear(edge_feat_dim → 64)
+      6 × GatedGraphConv(128)
+      GlobalAttentionPool(128)
+      HWEncoder Linear(hw_feat → 64)
+      LatencyHead MLP(192 → 64 → 1)
+      MemoryHead  MLP(192 → 64 → 1)
+      FidelityHead MLP(192 → 64 → 1) — quantum only
+[ ] Training pipeline (PyTorch, export to ONNX)
+[ ] Rust inference engine (load ONNX, run prediction < 100ms)
+[ ] Analytical fallback model (for new hardware / low confidence)
+[ ] Confidence scoring (use GNN if confidence > 0.7, else analytical)
+
+VALIDATION (Weeks 42–44)
+[ ] Hold-out test set: 10K examples not seen during training
+[ ] Acceptance: median error < 15% on held-out set
+[ ] Out-of-distribution test: predict on hardware not in training set
+```
+
+### Milestone 4.3 — Budget Enforcement (Weeks 43–46)
+
+```
+[ ] Budget constraint language in .lith (max_latency_ms, min_fidelity, ...)
+[ ] Budget checker: compare predictions vs constraints
+[ ] Actionable error messages: what constraint is violated and by how much
+[ ] Suggestion engine: top-3 passes that would bring budget into compliance
 ```
 
 ---
 
-### Milestone 4.2 — Quantum Simulator (Week 26–28)
+## Phase 5: Backends + Interoperability (Weeks 38–56)
 
-**Tasks:**
-```
-[ ] State vector simulator (CPU, single-threaded)
-      - Complex vector of size 2^n
-      - Gate application as sparse matrix multiply
-      - Measurement as projection + normalisation
+### Milestone 5.1 — CUDA Backend (Weeks 38–44)
 
-[ ] State vector simulator (GPU, via CUDA/cuStateVec)
-      - GPU-accelerated gate operations
-      - Scales to ~35 qubits
-
-[ ] Density matrix simulator
-      - 2^n × 2^n complex matrix
-      - Noise channel application (Kraus operators)
-      - Scales to ~20 qubits
-
-[ ] MPS simulator (Matrix Product States)
-      - Tensor train representation
-      - Bond dimension control (accuracy vs speed tradeoff)
-      - Scales to ~100 qubits for shallow circuits
-
-[ ] Monte Carlo noise simulation
-      - Sample from noise channel distributions
-      - Aggregate statistics over N trajectories
-      - Fidelity estimation from trajectory ensemble
-
-[ ] Simulator auto-selection (choose backend based on qubit count + noise)
-```
-
----
-
-### Milestone 4.3 — ML Performance Predictor (Week 28–30)
-
-**Tasks:**
-```
-[ ] Computation graph extractor (IR → graph features)
-      - Node features: op type, shapes, dtype, impl variant
-      - Edge features: tensor sizes, transfer bytes
-
-[ ] GNN model definition (PyTorch, exported to ONNX for runtime)
-      - Gated Graph Neural Network architecture
-      - 6 message passing layers
-      - Readout: graph-level MLP
-
-[ ] Training data collection pipeline
-      - Benchmark suite: 100+ micro-kernels and full models
-      - Run on H100, A100, RTX 4090, IBM Kyoto
-      - Store (graph, hardware_features, measurements)
-
-[ ] Predictor Rust inference engine
-      - Load ONNX model via candle or tract
-      - Feature extraction from LIFT IR
-      - Prediction: latency (ms), memory (GB), utilisation (%)
-
-[ ] Fidelity predictor (quantum-specific)
-      - Input: circuit graph + noise model parameters
-      - Output: expected fidelity distribution
-      - Uses noise propagation analysis from static engine
-
-[ ] Budget checker
-      - Compare predictions vs .lith budget constraints
-      - Generate actionable error messages on violation
-```
-
----
-
-## Phase 5: Backends + Interoperability (Weeks 31–38)
-
-### Milestone 5.1 — CUDA Backend (Week 31–33)
-
-**Tasks:**
 ```
 [ ] PTX code generation framework
-[ ] tensor.matmul → cuBLAS SGEMM / DGEMM / HGEMM
-[ ] tensor.attention → cuDNN attention / custom FlashAttention kernel
-[ ] tensor.conv2d → cuDNN convolution
+[ ] tensor.matmul → cuBLAS GEMM (FP32, FP16, INT8)
 [ ] tensor.flash_attention → custom FlashAttention v2/v3 template
-[ ] Tensor Cores utilisation (for f16/bf16/int8)
-[ ] Memory coalescing analysis and enforcement
-[ ] Kernel launch parameter optimisation (block size, grid size, shared memory)
-[ ] NCCL integration for multi-GPU operations
-[ ] CUDA graph capture (reduce kernel launch overhead)
+[ ] tensor.conv2d → cuDNN convolution
+[ ] tensor.quantize/dequantize → INT8 CUDA kernels
+[ ] Tensor Core utilisation annotations (FP16, BF16, INT8, FP8)
+[ ] Memory coalescing analysis
+[ ] Kernel launch config optimisation (block size, grid size, smem)
+[ ] NCCL integration for multi-GPU allreduce
+[ ] CUDA graph capture for inference (amortise launch overhead)
+[ ] Integration test: LLaMA 7B inference on H100, match PyTorch output
 ```
 
----
+### Milestone 5.2 — OpenQASM 3 Full Backend (Weeks 42–47)
 
-### Milestone 5.2 — OpenQASM 3 Backend (Week 33–34)
-
-**Tasks:**
 ```
-[ ] OpenQASM 3.0 emitter
-      - Gate definitions
-      - Qubit declarations
-      - Classical bit declarations
-      - Gate applications (with parameters)
-      - Measurements
-      - Classical control flow
-
-[ ] IBM Qiskit Runtime integration
-      - Submit OpenQASM circuits to IBM backends
-      - Poll for results
-      - Return measurement statistics
-
-[ ] AWS Braket integration
-      - Submit circuits to Rigetti, IonQ, OQC via Braket API
-      - Parse Braket result format
-
-[ ] Pulse-level lowering (IBM pulse backend)
-      - Decompose gates to microwave pulses
-      - Schedule on IBM pulse channels
-      - DRAG pulse shaping for reduced leakage
+[ ] Complete OpenQASM 3.0 emitter (all gates, classicals, control flow)
+[ ] IBM Qiskit Runtime submission
+      Create job, poll status, retrieve results
+[ ] AWS Braket submission (Rigetti, IonQ via Braket API)
+[ ] Pulse-level lowering for IBM (drag pulse shaping)
+[ ] Integration test: VQE H₂ on IBM Kyoto, compare energy to literature
 ```
 
----
+### Milestone 5.3 — Importers (Weeks 44–52)
 
-### Milestone 5.3 — LLVM and XLA Backends (Week 34–35)
-
-**Tasks:**
 ```
-[ ] LLVM IR emitter (for CPU targets)
-      - Scalar operations → LLVM instructions
-      - SIMD vectorisation (AVX-512 for tensor ops on CPU)
-      - OpenMP pragmas for multi-core
+[ ] PyTorch FX importer — complete to 100% (from 80%)
+      All aten:: ops handled or mapped to UnsupportedOp
+      Dynamic shape annotation preserved
 
-[ ] XLA/StableHLO bridge (for TPU)
-      - LIFT-TENSOR → StableHLO dialect
-      - Leverage XLA's TPU compiler
-```
-
----
-
-### Milestone 5.4 — Importers (Week 35–37)
-
-**Tasks:**
-```
-[ ] PyTorch FX graph importer
-      - Walk PyTorch FX IR
-      - Map aten:: ops to tensor.* ops
-      - Infer shapes from PyTorch shape propagation
-      - Handle dynamic shapes (mark as Symbolic)
-
-[ ] ONNX importer
-      - Parse ONNX protobuf
-      - Map ONNX ops to tensor.* ops
-      - Handle opset differences
+[ ] ONNX importer (opset 19)
+      Complete type mapping
+      All common ops
 
 [ ] Qiskit QuantumCircuit importer
-      - Walk Qiskit DAGCircuit
-      - Map Qiskit gates to quantum.* ops
-      - Import noise model from Qiskit NoiseModel
+      All standard gates
+      Parametrised gates
+      Noise model import (from Qiskit NoiseModel)
 
-[ ] OpenQASM 3 importer
-      - Parse OpenQASM 3 source
-      - Map gate statements to quantum.* ops
-      - Import classical control flow
+[ ] Cirq Circuit importer
+      All standard gates
 
-[ ] Exporters (reverse direction)
-      - LIFT-TENSOR → ONNX
-      - LIFT-QUANTUM → OpenQASM 3
-      - LIFT-QUANTUM → Qiskit QuantumCircuit
+[ ] OpenQASM 3 importer — complete to 100% (from 60%)
 ```
 
----
+### Milestone 5.4 — .lith Parser (Weeks 48–54)
 
-### Milestone 5.5 — .lith Parser (Week 37–38)
-
-**Tasks:**
 ```
-[ ] Lexer (tokenise .lith source)
-[ ] Parser (recursive descent, produce typed config tree)
-[ ] Environment variable substitution (${VAR} → actual value)
-[ ] File inclusion (include "base.lith")
-[ ] Config struct population (parse tree → LiftConfig)
-[ ] Validation engine
-      - Check all enum values are valid
-      - Check cross-section consistency (e.g., hybrid target requires both gpu and qpu)
-      - Check budget values are positive
-[ ] Helpful error messages (point to offending line + suggest fix)
+[ ] Complete grammar (all sections and fields)
+[ ] Environment variable substitution ${VAR_NAME}
+[ ] File inclusion: include "./base.lith"
+[ ] Config inheritance: extends = "base.lith"
+[ ] Conditional blocks: if target.type == "qpu" { ... }
+[ ] Enum validation (all field values checked against allowed set)
+[ ] Cross-section consistency checks
+[ ] Helpful error messages (line + column + suggestion)
 [ ] Default value resolution
-[ ] Config documentation generator (auto-generate reference docs from struct annotations)
+[ ] Auto-generated reference documentation from struct annotations
 ```
 
 ---
 
-## Phase 6: Tooling + Observability (Weeks 39–44)
+## Phase 6: Tooling + Observability (Weeks 52–62)
 
-### Milestone 6.1 — CLI (Week 39–40)
+### Milestone 6.1 — CLI (Weeks 52–56)
 
-**Tasks:**
 ```
-lift compile <file.lif>
-  --config <project.lith>   (configuration file)
-  --target <cuda|qasm|llvm> (override target)
-  --passes <pass1,pass2>    (override pass pipeline)
-  --output <path>           (output directory)
-  --verbose                 (verbose output)
+lift compile <file.lif> [--config <file.lith>] [--target cuda|qasm|llvm]
+             [--passes <p1,p2,...>] [--output <dir>]
 
-lift simulate <file.lif>
-  --config <project.lith>
-  --report <report.html>    (generate HTML simulation report)
-  --json <metrics.json>     (JSON metrics output)
+lift simulate <file.lif> [--config <file.lith>] [--report <html>]
 
-lift predict <file.lif>
-  --hardware <h100|ibm_kyoto|...>
-  --noise-model <file.json>
+lift predict  <file.lif> [--hardware h100|ibm_kyoto|...] [--noise <json>]
 
-lift optimise <file.lif>
-  --passes <pass1,pass2,...>
-  --output <optimised.lif>
+lift optimise <file.lif> [--passes <p1,p2,...>] [--output <file.lif>]
 
-lift convert
-  --from <pytorch|onnx|qiskit|qasm>
-  --to <lift>
-  <input_file>
-  --output <output.lif>
+lift convert  [--from pytorch|onnx|qiskit|qasm] [--to lift] <input>
 
-lift verify <file.lif>
-  (check IR well-formedness and type correctness)
+lift verify   <file.lif>     (IR well-formedness check)
 
-lift info <file.lif>
-  (print statistics: op counts, shapes, estimated FLOPs)
+lift analyse  <file.lif>     (FLOPs, shapes, circuit stats, energy)
+
+lift info     <file.lif>     (dialect list, op counts, quick summary)
 ```
 
----
+### Milestone 6.2 — Observability (Weeks 54–60)
 
-### Milestone 6.2 — Observability (Week 40–42)
-
-**Tasks:**
 ```
-[ ] Structured logging (JSON, using tracing crate)
-      - log every pass: name, duration, IR changes
-      - log every backend lowering step
-      - log prediction results
+[ ] Structured JSON logging (tracing crate)
+      Log every pass: name, duration, IR delta, budget impact
+      Log every backend step
+      Log prediction results
 
-[ ] Prometheus metrics endpoint (/metrics)
-      - compilation_duration_seconds (histogram by pass)
-      - prediction_accuracy (compare predicted vs actual for tests)
-      - pass_improvement (latency reduction per pass)
+[ ] Prometheus metrics endpoint (/metrics on compilation server)
+      compilation_duration_seconds histogram per pass
+      prediction_error_ratio (compare predicted vs actual)
+      pass_improvement_ratio per pass type
 
-[ ] Interactive web dashboard
-      - Show compilation trace (passes, durations)
-      - Show computation graph (interactive, zoomable)
-      - Show circuit diagram (for quantum modules)
-      - Show performance predictions vs actuals
+[ ] Interactive web dashboard (port 8081)
+      Compilation trace timeline
+      Computation graph viewer (interactive, zoomable)
+      Circuit diagram viewer for quantum modules
+      Before/after IR diff viewer
 
 [ ] Flamegraph profiler integration
-      - Profile pass execution time
-      - Identify bottlenecks in the compiler itself
+      Profile compiler pass execution time
+      Identify bottlenecks in compiler itself
 
 [ ] Compilation replay
-      - Record all inputs + config
-      - Re-run exact compilation for debugging
-      - Compare IR at each pass checkpoint
+      Record all inputs + config
+      Re-run exact compilation for debugging
+      Compare IR at each checkpoint
 ```
 
----
+### Milestone 6.3 — Auto-Tuning (Weeks 58–62)
 
-### Milestone 6.3 — Auto-Tuning (Week 42–44)
-
-**Tasks:**
 ```
-[ ] Pass ordering search (Bayesian optimisation over pass sequences)
-      - Define search space (which passes, in what order)
-      - Objective: minimise predicted latency
-      - Constraints: budget from .lith
+[ ] Pass ordering search (Bayesian optimisation, 50-iteration budget)
+      Search space: which passes, in what order
+      Objective: minimise predicted latency
 
-[ ] GNN-based pass selector (RL agent trained on compilation traces)
-      - State: current IR features
-      - Action: which pass to apply next
-      - Reward: improvement in predicted performance
-
-[ ] Runtime feedback loop
-      - Collect actual performance after execution
-      - Feed back to prediction model (online learning)
-      - Adjust pass selection based on observed vs predicted gap
+[ ] RL-based pass selector (lightweight GNN agent)
+      State: current IR features
+      Action: next pass to apply
+      Reward: improvement in predicted performance
 
 [ ] A/B testing infrastructure
-      - Run two compilation strategies in parallel
-      - Select winner based on real performance
-      - Gradual rollout of new optimisations
+      Run two compilation strategies in parallel (10% of traffic)
+      Select winner based on real execution performance
 ```
 
 ---
 
-## Phase 7: Documentation + Public Release (Weeks 45–48)
+## Phase 7: Documentation + Public Release (Weeks 60–96)
 
-### Milestone 7.1 — Documentation (Week 45–46)
+### Milestone 7.1 — Documentation (Weeks 60–70)
 
-**Deliverables:**
 ```
-[ ] API Documentation (rustdoc for all public types and functions)
-[ ] Language Reference (.lif syntax, all operations, all types)
-[ ] Configuration Reference (.lith all sections and fields)
-[ ] Getting Started Guide (hello world → real model in 30 min)
+[ ] API documentation (rustdoc, all public items)
+[ ] Language reference (.lif — all operations, all types, all dialects)
+[ ] Configuration reference (.lith — all sections and fields)
+[ ] Getting Started Guide (30 minutes: install → hello world → real model)
 
-[ ] Tutorials:
-      Tutorial 1: LLM Inference Optimisation
-        - Start with LLaMA 7B in naive LIFT-TENSOR
-        - Apply FlashAttention, KV cache, INT8 quantisation
-        - Compare before/after performance
+TUTORIALS
+[ ] Tutorial 1: LLM Inference Optimisation
+      LLaMA 7B → FlashAttention → KV cache → INT8 → benchmark vs PyTorch
 
-      Tutorial 2: VQE for Quantum Chemistry
-        - Hydrogen molecule ground state energy
-        - LIFT-QUANTUM, noise model, ZNE error mitigation
-        - Compare simulated vs real IBM results
+[ ] Tutorial 2: VQE for Hydrogen Molecule
+      H₂ VQE → LIFT-QUANTUM → noise model → ZNE → IBM Kyoto → compare energy
 
-      Tutorial 3: Quantum Neural Network Classifier
-        - MNIST classification with 4-qubit QNN
-        - LIFT-HYBRID: classical encoder + quantum layer
-        - End-to-end training with joint gradients
+[ ] Tutorial 3: QNN Image Classifier
+      MNIST → hybrid QNN → angle encoding → joint gradient → train end-to-end
 
-      Tutorial 4: Writing a Custom Pass
-        - Implement a simple tensor fusion pass
-        - Register it with the pass manager
-        - Use it from .lith
+[ ] Tutorial 4: Writing a Custom Optimisation Pass
+      Implement simple fusion → register → use from .lith
 
-[ ] Contributor Guide (how to add a dialect, pass, backend)
-[ ] Architecture Document (this document, updated)
+[ ] Contributor Guide (add a dialect, pass, backend)
+
+VIDEOS
+[ ] Demo video: 10-minute overview of LIFT
+[ ] Tutorial video series (one per tutorial above)
 ```
 
----
+### Milestone 7.2 — Benchmark Suite (Weeks 68–80)
 
-### Milestone 7.2 — Benchmarks (Week 46–47)
-
-**Benchmark suite:**
 ```
-[ ] AI Benchmarks
-      - BERT-Large forward pass (batch=1, seq=512)
-      - LLaMA 7B single-token inference
-      - ResNet-50 training step (batch=256)
-      - Vision Transformer (ViT-Large) inference
+AI BENCHMARKS (compare vs PyTorch + torch.compile + TensorRT)
+[ ] BERT-Large inference (batch=1, seq=512)
+[ ] LLaMA 7B single-token inference
+[ ] ResNet-50 training step (batch=256)
+[ ] ViT-Large inference
 
-    Compare vs: PyTorch eager, torch.compile, TensorRT, ONNX Runtime
+QUANTUM BENCHMARKS (compare vs Qiskit transpile() + pytket)
+[ ] QAOA MaxCut (n=20, p=3)
+[ ] VQE H₂O (12 qubits)
+[ ] Quantum Volume circuits (QV=128)
+[ ] Random circuits (n=20, depth=100)
 
-[ ] Quantum Benchmarks
-      - QAOA MaxCut (n=20 variables, depth p=3)
-      - VQE H2O molecule (12 qubits)
-      - Quantum Volume circuits (QV=128)
-      - Random circuits (n=20 qubits, depth=100)
+HYBRID BENCHMARKS (compare vs PennyLane)
+[ ] QNN MNIST (4 qubits, 10 classes)
+[ ] QAOA + classical post-processing
 
-    Compare vs: Qiskit transpile(), Pytket, tket2
+COMPILATION TIME BENCHMARKS
+[ ] Time to compile each model above
+[ ] Compare vs torch.compile, Qiskit transpile
 
-[ ] Hybrid Benchmarks
-      - QNN MNIST (4 qubits, 10 classes)
-      - QAOA + classical post-processing
-      - VQE + gradient computation
-
-    Compare vs: PennyLane, Qiskit ML
-
-[ ] Compilation Time Benchmarks
-      - Time to compile each model
-      Compare vs: torch.compile, Qiskit transpile
-
-[ ] Report: 5-page benchmark paper with methodology + results
+[ ] 5-page benchmark paper (methodology + results)
 ```
 
----
+### Milestone 7.3 — Security Review (Weeks 76–84)
 
-### Milestone 7.3 — Public Release (Week 47–48)
-
-**Deliverables:**
 ```
-[ ] GitHub repository (lift-framework/lift)
-      - MIT license
-      - README.md (this document, rendered)
-      - CONTRIBUTING.md
-      - CODE_OF_CONDUCT.md
-      - SECURITY.md (responsible disclosure policy)
+[ ] Threat model document (see DESIGN.md Part 10)
+[ ] Fuzzing campaign: 1M+ random .lif inputs to parser
+[ ] Fuzzing campaign: 100K+ random .lith configs
+[ ] cargo audit weekly (automated in CI)
+[ ] cargo-deny for license + advisory policy
+[ ] No unsafe in core crates audit (MIRI verification)
+[ ] Sandboxed compilation implementation (seccomp or Docker)
+[ ] Security disclosure policy published (security@lift-framework.org)
+[ ] GPG signing setup for all releases
+```
 
-[ ] crates.io publication (lift-core, lift-tensor, lift-quantum, lift-hybrid, lift-cli)
-[ ] PyPI package (Python bindings via PyO3/Maturin)
-[ ] Docker image (lift:latest with all backends pre-installed)
+### Milestone 7.4 — Public Release v1.0 (Weeks 84–96)
+
+```
+[ ] GitHub repository: lift-framework/lift
+      MIT license, README.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md
+
+[ ] crates.io publication
+      lift-core, lift-tensor, lift-quantum, lift-hybrid, lift-cli, lift-python
+
+[ ] PyPI package (via Maturin)
+[ ] Docker image: lift:latest (all backends pre-installed)
 
 [ ] arXiv preprint
-      Title: "LIFT: A Unified Intermediate Representation for AI and Quantum Computing"
-      Sections: Introduction, Related Work, Design, Implementation, Evaluation, Conclusion
+      "LIFT: A Unified Intermediate Representation for AI and Quantum Computing"
 
-[ ] Blog post (technical introduction, 3000 words)
-[ ] HN / r/MachineLearning / r/QuantumComputing announcement
+[ ] Blog post (3000 words, technical introduction)
+[ ] Announcement posts (HN, r/MachineLearning, r/QuantumComputing)
 
 [ ] Community infrastructure
-      - Discord server (lift-framework)
-      - GitHub Discussions enabled
-      - Issue templates (bug report, feature request, RFC)
+      Discord server (lift-framework)
+      GitHub Discussions
+      Issue templates (bug, feature, RFC)
 ```
 
 ---
 
-## Resource Requirements
+## Continuous: CI/CD Pipeline
 
-### Team
+**Set up in Week 1. Never disabled.**
+
+```yaml
+# .github/workflows/ci.yml
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --all --all-features
+      - run: cargo clippy --all -- -D warnings
+      - run: cargo fmt --all -- --check
+      - run: cargo audit
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+      - uses: codecov/codecov-action@v3
+        with: { files: lcov.info }
+      # Fail if coverage drops below 75%
+
+  integration:
+    runs-on: [self-hosted, gpu]
+    steps:
+      - run: cargo test --features cuda
+      - run: python tests/run_quantum_sim.py
+
+  bench:
+    runs-on: [self-hosted, gpu]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - run: cargo bench -- --output benchmarks.json
+      - run: python scripts/check_regression.py benchmarks.json
+      # Fail if any benchmark regresses > 10%
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, integration]
+    steps:
+      - run: cargo publish --package lift-core
+      - run: cargo publish --package lift-tensor
+      # etc.
+      - run: docker build -t lift:${{ github.ref_name }} .
+      - run: docker push ghcr.io/lift-framework/lift
+```
+
+**Nightly runs (additional):**
+- Full benchmark suite (4 hours on GPU cluster)
+- QPU regression tests (submit to IBM simulator, compare outputs)
+- Retrain prediction model with accumulated traces
+
+---
+
+## Hardware Requirements
+
+### Development (Ongoing)
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| GPU | 1× A100 40GB | 2× H100 80GB |
+| CPU | 16-core workstation | 32-core server |
+| RAM | 128 GB | 256 GB |
+| QPU access | 10 QPU-hours/month | 30 QPU-hours/month |
+
+### CI/CD
+
+| Resource | Purpose |
+|----------|---------|
+| 1× A100 runner | GPU integration tests |
+| Quantum sim server (64-core, 256 GB) | Large circuit simulations |
+| Cloud QPU credits | IBM Quantum, AWS Braket |
+
+### Benchmark (Phase 7 only)
+
+| Resource | Purpose |
+|----------|---------|
+| 8× H100 cluster | Distributed training benchmarks |
+| 20 QPU-hours | Quantum benchmark suite |
+| 2000 GPU-hours | GNN training data collection |
+
+---
+
+## Success Criteria
+
+### At 6 Months (End of Phase 1)
 
 ```
-MINIMUM VIABLE TEAM (4 people):
-  1 × Compiler Engineer (IR design, pass infrastructure, LLVM backend)
-  1 × AI Systems Engineer (TENSOR dialect, CUDA backend, AI passes)
-  1 × Quantum Engineer (QUANTUM dialect, noise models, QC passes, QASM backend)
-  1 × ML Engineer (prediction engine, benchmarks, evaluation)
-
-IDEAL TEAM (7 people):
-  + 1 × Systems Engineer (performance, tooling, CI/CD)
-  + 1 × Developer Advocate (documentation, tutorials, community)
-  + 1 × Research Scientist (algorithm design, publications)
+[ ] 500+ passing tests across lift-core and lift-tensor
+[ ] 10+ AI models compile to LLVM backend and produce correct output
+[ ] Compilation time < 10 seconds for 7B-parameter model (LLVM target)
+[ ] Python bindings functional: import lift; lift.analyse() works
+[ ] Zero memory leaks (verified ASAN + Valgrind)
+[ ] CI green on every commit
 ```
 
-### Hardware
+### At 12 Months (End of Phase 2b)
 
 ```
-Development:
-  - 2× NVIDIA A100 or H100 (AI backend development and testing)
-  - IBM Quantum access (5-10 QPU hours/month for quantum testing)
-  - AWS Braket credits (for multi-vendor QPU testing)
-
-CI/CD:
-  - 1× A100 instance for GPU tests
-  - Quantum simulator server (32-core, 256 GB RAM, for large quantum simulations)
-
-Benchmarking:
-  - Access to full H100 cluster (8×) for distributed training benchmarks
-  - 20 QPU hours on IBM Kyoto or similar for quantum benchmarks
+[ ] Quantum circuits of up to 100 qubits simulate correctly
+[ ] Layout mapping (SABRE) produces correct results on IBM coupling maps
+[ ] ZNE pass improves fidelity by > 5× on noisy simulations
+[ ] Import Qiskit circuits and compile to OpenQASM 3
+[ ] End-to-end: VQE H₂ runs on IBM Kyoto and returns correct energy
 ```
 
-### Compute Budget (Estimated)
+### At 18 Months (End of Phase 5)
 
 ```
-Training the GNN prediction model:
-  - Dataset collection: ~500 GPU-hours on various hardware
-  - Training: ~50 GPU-hours
-  - Validation: ~20 GPU-hours
+[ ] LLaMA 7B inference on H100 within 10% of TensorRT performance
+[ ] QNN MNIST trains end-to-end with joint gradients
+[ ] .lith parser validates complete configs with helpful error messages
+[ ] All 5 importers functional (PyTorch FX, ONNX, Qiskit, Cirq, OpenQASM3)
+[ ] 86%+ test coverage
+```
 
-Quantum calibration data:
-  - ~100 QPU hours to build calibration database for major backends
+### At 24 Months (v1.0 Release)
 
-Ongoing CI:
-  - ~10 GPU-hours/week for full benchmark suite
-  - ~5 QPU hours/month for quantum regression tests
+```
+[ ] arXiv preprint submitted
+[ ] 100+ GitHub stars in first 30 days
+[ ] 5+ external contributors (not on core team)
+[ ] Benchmark results published (AI and quantum)
+[ ] 3+ tutorials published
+[ ] Used by at least 2 external research groups
 ```
 
 ---
@@ -907,52 +944,14 @@ Ongoing CI:
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| QPU access limits slow quantum testing | High | Medium | Use simulators for most tests; batch real QPU runs |
-| GNN predictor accuracy insufficient | Medium | High | Maintain analytical fallback; improve with more data |
-| MLIR API changes break CUDA lowering | Low | Medium | Abstract MLIR dependency; version pin |
-| Quantum hardware calibration drift | High | Low | Re-fetch calibration daily; build drift model |
-| Python binding performance | Medium | Low | PyO3 is fast; benchmark and optimise critical paths |
-| Community adoption slower than expected | Medium | High | Partner with 2-3 research groups early; co-author papers |
+| Linear types in branches complex to implement | High | Medium | Prototype region-based analysis in Phase 0; descope to subset without branches if needed |
+| GNN predictor does not generalise | Medium | High | Analytical fallback model; ensemble; more training data |
+| QPU access limits quantum testing | High | Medium | Use simulators for 95% of tests; batch real QPU runs monthly |
+| CUDA backend performance gap vs TensorRT | Medium | Medium | Use cuBLAS / cuDNN for critical kernels; custom only where needed |
+| Timeline slips | High | Medium | Buffer built in (24 months not 12); descope features before delaying |
+| Noise composition in fusion incorrect | Medium | High | Use depolarising approximation in v1.0; full Kraus in v1.1; flag in docs |
+| Python bindings break on PyTorch upgrade | Low | Low | Pin tested PyTorch versions; use FX stable API |
+| Community adoption too slow | Medium | High | Partner with 2 research groups early; co-author paper; active Discord |
 
 ---
 
-## Success Metrics
-
-### At 6 Months (Phase 3 Complete)
-
-```
-[ ] 500+ passing tests across all three dialects
-[ ] 10 AI models can be expressed and compiled to CUDA
-[ ] 5 quantum circuits can be expressed and compiled to OpenQASM 3
-[ ] 2 hybrid examples working end-to-end
-[ ] Compilation time < 10 seconds for all test cases
-[ ] Zero memory leaks (verified by ASAN/Valgrind)
-```
-
-### At 12 Months (Full Release)
-
-```
-[ ] Benchmark results competitive with PyTorch+torch.compile for AI
-[ ] Benchmark results competitive with Qiskit for quantum
-[ ] 100+ GitHub stars in first month
-[ ] 5+ external contributors (not on core team)
-[ ] 2 research papers citing LIFT
-[ ] 3 tutorial videos published
-[ ] arXiv preprint submitted
-```
-
-### Long-Term (2 Years)
-
-```
-[ ] 1000+ GitHub stars
-[ ] 20+ external contributors
-[ ] Used by at least 2 industrial research labs
-[ ] Standard for hybrid AI+QC at 1 major conference (NeurIPS, ICML, QIP)
-[ ] Adoption by at least 1 QPU vendor as preferred input format
-```
-
----
-
-*This implementation plan is a living document. Update it as priorities shift and new information arrives.*
-
-*LIFT — Built by engineers who believe the future of computing is unified.*
