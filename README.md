@@ -1,3 +1,6 @@
+<img width="1262" height="602" alt="image" src="https://github.com/user-attachments/assets/3880ecec-ff3f-4b44-b256-c3a9f07ee813" />
+
+
 <!--
   LIFT — Language for Intelligent Frameworks and Technologies
   README v2.0  |  Phoenix Edition  |  Corrected & Honest
