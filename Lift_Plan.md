@@ -1,3 +1,5 @@
+<img width="1343" height="674" alt="image" src="https://github.com/user-attachments/assets/0e0d58c1-327c-402f-98d3-304bcc395009" />
+
 # LIFT — Complete Implementation Plan
 
 **Timeline:** 24 months (honest) — not 12
