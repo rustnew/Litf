@@ -692,8 +692,8 @@ We are not claiming a finished product. We are claiming a correct architecture a
 ```bibtex
 @software{lift2025,
   title  = {LIFT: Language for Intelligent Frameworks and Technologies},
-  author = {Martial-Christian and Contributors},
-  year   = {2025},
+  author = {MARTIAL and Contributors},
+  year   = {2026},
   url    = {https://github.com/lift-framework/lift},
   note   = {Unified IR for AI and Quantum Computing. Research Alpha.}
 }
