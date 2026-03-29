@@ -1,0 +1,19 @@
+[package]
+name = "lift-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+lift-core = { workspace = true }
+lift-ast = { workspace = true }
+lift-tensor = { workspace = true }
+lift-quantum = { workspace = true }
+lift-hybrid = { workspace = true }
+lift-sim = { workspace = true }
+lift-predict = { workspace = true }
+lift-opt = { workspace = true }
+lift-import = { workspace = true }
+lift-export = { workspace = true }
+lift-config = { workspace = true }
