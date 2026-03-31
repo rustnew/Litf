@@ -17,12 +17,12 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT"
 authors = ["LIFT Framework Contributors"]
-repository = "https://github.com/lift-framework/lift"
+repository = "https://github.com/rustnew/Lift"
 description = "LIFT — Language for Intelligent Frameworks and Technologies: Unified IR for AI and Quantum Computing"
 
 [workspace.dependencies]
