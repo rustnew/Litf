@@ -1,0 +1,58 @@
+#dialect tensor
+
+// BERT-base — Google
+// Architecture: 12 layers, 768 hidden, 12 heads, 64 head_dim, 3072 intermediate
+// Vocab: 30522, Max seq: 512, GELU activation, post-norm
+
+module @bert_base {
+
+    func @embedding(%ids: tensor<1x512xi32>, %table: tensor<30522x768xf32>, %pos_table: tensor<512x768xf32>) -> tensor<1x512x768xf32> {
+        %tok = "tensor.embedding"(%ids, %table) : (tensor<1x512xi32>, tensor<30522x768xf32>) -> tensor<1x512x768xf32>
+        %pos = "tensor.embedding"(%ids, %pos_table) : (tensor<1x512xi32>, tensor<512x768xf32>) -> tensor<1x512x768xf32>
+        %emb = "tensor.add"(%tok, %pos) : (tensor<1x512x768xf32>, tensor<1x512x768xf32>) -> tensor<1x512x768xf32>
+        return %emb
+    }
+
+    func @layer(
+        %x: tensor<1x512x768xf32>,
+        %wq: tensor<768x768xf32>,
+        %wk: tensor<768x768xf32>,
+        %wv: tensor<768x768xf32>,
+        %wo: tensor<768x768xf32>,
+        %ln1_w: tensor<768xf32>,
+        %ln1_b: tensor<768xf32>,
+        %w_up: tensor<768x3072xf32>,
+        %b_up: tensor<3072xf32>,
+        %w_down: tensor<3072x768xf32>,
+        %b_down: tensor<768xf32>,
+        %ln2_w: tensor<768xf32>,
+        %ln2_b: tensor<768xf32>
+    ) -> tensor<1x512x768xf32> {
+        // Self-Attention
+        %q = "tensor.matmul"(%x, %wq) : (tensor<1x512x768xf32>, tensor<768x768xf32>) -> tensor<1x512x768xf32>
+        %k = "tensor.matmul"(%x, %wk) : (tensor<1x512x768xf32>, tensor<768x768xf32>) -> tensor<1x512x768xf32>
+        %v = "tensor.matmul"(%x, %wv) : (tensor<1x512x768xf32>, tensor<768x768xf32>) -> tensor<1x512x768xf32>
+        %attn = "tensor.multi_head_attention"(%q, %k, %v) : (tensor<1x512x768xf32>, tensor<1x512x768xf32>, tensor<1x512x768xf32>) -> tensor<1x512x768xf32>
+        %attn_proj = "tensor.matmul"(%attn, %wo) : (tensor<1x512x768xf32>, tensor<768x768xf32>) -> tensor<1x512x768xf32>
+        %r1 = "tensor.add"(%x, %attn_proj) : (tensor<1x512x768xf32>, tensor<1x512x768xf32>) -> tensor<1x512x768xf32>
+        %n1 = "tensor.layernorm"(%r1, %ln1_w) : (tensor<1x512x768xf32>, tensor<768xf32>) -> tensor<1x512x768xf32>
+
+        // Feed-Forward (GELU)
+        %h1 = "tensor.matmul"(%n1, %w_up) : (tensor<1x512x768xf32>, tensor<768x3072xf32>) -> tensor<1x512x3072xf32>
+        %h2 = "tensor.add"(%h1, %b_up) : (tensor<1x512x3072xf32>, tensor<3072xf32>) -> tensor<1x512x3072xf32>
+        %h3 = "tensor.gelu"(%h2) : (tensor<1x512x3072xf32>) -> tensor<1x512x3072xf32>
+        %h4 = "tensor.matmul"(%h3, %w_down) : (tensor<1x512x3072xf32>, tensor<3072x768xf32>) -> tensor<1x512x768xf32>
+        %h5 = "tensor.add"(%h4, %b_down) : (tensor<1x512x768xf32>, tensor<768xf32>) -> tensor<1x512x768xf32>
+        %r2 = "tensor.add"(%n1, %h5) : (tensor<1x512x768xf32>, tensor<1x512x768xf32>) -> tensor<1x512x768xf32>
+        %n2 = "tensor.layernorm"(%r2, %ln2_w) : (tensor<1x512x768xf32>, tensor<768xf32>) -> tensor<1x512x768xf32>
+
+        return %n2
+    }
+
+    func @classifier(%x: tensor<1x512x768xf32>, %cls_w: tensor<768x2xf32>) -> tensor<1x2xf32> {
+        %pool = "tensor.global_avgpool"(%x) : (tensor<1x512x768xf32>) -> tensor<1x768xf32>
+        %logits = "tensor.matmul"(%pool, %cls_w) : (tensor<1x768xf32>, tensor<768x2xf32>) -> tensor<1x2xf32>
+        %out = "tensor.softmax"(%logits) : (tensor<1x2xf32>) -> tensor<1x2xf32>
+        return %out
+    }
+}

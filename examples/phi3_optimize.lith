@@ -1,0 +1,23 @@
+# Phi-3-mini optimization configuration
+# All 11 passes enabled for maximum optimization
+
+[target]
+backend = "llvm"
+device = "h100"
+precision = "fp16"
+
+[budget]
+max_flops = 500000000000
+max_memory_bytes = 80000000000
+max_time_ms = 100.0
+
+[optimisation]
+level = O3
+max_iterations = 20
+passes = canonicalize, constant-folding, dce, tensor-fusion, flash-attention, cse, quantisation-pass
+
+[simulation]
+shape_propagation = true
+flop_counting = true
+memory_analysis = true
+noise_simulation = false

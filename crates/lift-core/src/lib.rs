@@ -20,6 +20,7 @@ pub mod verifier;
 pub mod printer;
 pub mod dialect;
 pub mod pass;
+pub mod model_builder;
 
 pub use context::Context;
 pub use types::{TypeId, CoreType, DataType};
@@ -36,3 +37,4 @@ pub use dialect::{Dialect, DialectRegistry};
 pub use verifier::{Verifier, VerifyError};
 pub use printer::Printer;
 pub use pass::{Pass, PassManager, PassResult, AnalysisCache};
+pub use model_builder::{ModelBuilder, tensor, tensor_1d, tensor_2d, tensor_3d, tensor_4d, ModelType, build_lith_config};

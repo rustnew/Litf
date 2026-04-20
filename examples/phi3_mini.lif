@@ -1,0 +1,97 @@
+#dialect tensor
+
+// Phi-3-mini (Microsoft) — 3.8B parameters
+// Architecture: 32 layers, 3072 hidden, 32 heads, 96 head_dim, 8192 intermediate
+// Vocab: 32064, Max seq: 4096, RoPE, SiLU activation, GroupedQueryAttention (32 KV heads)
+
+module @phi3_mini {
+
+    // Token embedding: vocab_size=32064, hidden=3072
+    func @embedding(%input_ids: tensor<1x128xi32>, %embed_table: tensor<32064x3072xf32>) -> tensor<1x128x3072xf32> {
+        %emb = "tensor.embedding"(%input_ids, %embed_table) : (tensor<1x128xi32>, tensor<32064x3072xf32>) -> tensor<1x128x3072xf32>
+        return %emb
+    }
+
+    // RMSNorm (used before attention and FFN)
+    func @rmsnorm(%x: tensor<1x128x3072xf32>, %weight: tensor<3072xf32>) -> tensor<1x128x3072xf32> {
+        %out = "tensor.rmsnorm"(%x, %weight) : (tensor<1x128x3072xf32>, tensor<3072xf32>) -> tensor<1x128x3072xf32>
+        return %out
+    }
+
+    // Grouped-Query Self-Attention (32 heads, head_dim=96)
+    func @attention(
+        %x: tensor<1x128x3072xf32>,
+        %wq: tensor<3072x3072xf32>,
+        %wk: tensor<3072x3072xf32>,
+        %wv: tensor<3072x3072xf32>,
+        %wo: tensor<3072x3072xf32>
+    ) -> tensor<1x128x3072xf32> {
+        // Q, K, V projections
+        %q = "tensor.matmul"(%x, %wq) : (tensor<1x128x3072xf32>, tensor<3072x3072xf32>) -> tensor<1x128x3072xf32>
+        %k = "tensor.matmul"(%x, %wk) : (tensor<1x128x3072xf32>, tensor<3072x3072xf32>) -> tensor<1x128x3072xf32>
+        %v = "tensor.matmul"(%x, %wv) : (tensor<1x128x3072xf32>, tensor<3072x3072xf32>) -> tensor<1x128x3072xf32>
+
+        // Grouped-query attention (32 heads, head_dim=96)
+        %attn = "tensor.grouped_query_attention"(%q, %k, %v) : (tensor<1x128x3072xf32>, tensor<1x128x3072xf32>, tensor<1x128x3072xf32>) -> tensor<1x128x3072xf32>
+
+        // Output projection
+        %out = "tensor.matmul"(%attn, %wo) : (tensor<1x128x3072xf32>, tensor<3072x3072xf32>) -> tensor<1x128x3072xf32>
+        return %out
+    }
+
+    // SwiGLU Feed-Forward Network (Phi-3 style: gate + up + down)
+    func @ffn(
+        %x: tensor<1x128x3072xf32>,
+        %w_gate: tensor<3072x8192xf32>,
+        %w_up: tensor<3072x8192xf32>,
+        %w_down: tensor<8192x3072xf32>
+    ) -> tensor<1x128x3072xf32> {
+        %gate = "tensor.matmul"(%x, %w_gate) : (tensor<1x128x3072xf32>, tensor<3072x8192xf32>) -> tensor<1x128x8192xf32>
+        %gate_act = "tensor.silu"(%gate) : (tensor<1x128x8192xf32>) -> tensor<1x128x8192xf32>
+        %up = "tensor.matmul"(%x, %w_up) : (tensor<1x128x3072xf32>, tensor<3072x8192xf32>) -> tensor<1x128x8192xf32>
+        %gated = "tensor.mul"(%gate_act, %up) : (tensor<1x128x8192xf32>, tensor<1x128x8192xf32>) -> tensor<1x128x8192xf32>
+        %out = "tensor.matmul"(%gated, %w_down) : (tensor<1x128x8192xf32>, tensor<8192x3072xf32>) -> tensor<1x128x3072xf32>
+        return %out
+    }
+
+    // Single Transformer Layer (pre-norm architecture)
+    func @layer(
+        %x: tensor<1x128x3072xf32>,
+        %ln1_w: tensor<3072xf32>,
+        %wq: tensor<3072x3072xf32>,
+        %wk: tensor<3072x3072xf32>,
+        %wv: tensor<3072x3072xf32>,
+        %wo: tensor<3072x3072xf32>,
+        %ln2_w: tensor<3072xf32>,
+        %w_gate: tensor<3072x8192xf32>,
+        %w_up: tensor<3072x8192xf32>,
+        %w_down: tensor<8192x3072xf32>
+    ) -> tensor<1x128x3072xf32> {
+        // Pre-norm + Attention + Residual
+        %n1 = "tensor.rmsnorm"(%x, %ln1_w) : (tensor<1x128x3072xf32>, tensor<3072xf32>) -> tensor<1x128x3072xf32>
+        %q = "tensor.matmul"(%n1, %wq) : (tensor<1x128x3072xf32>, tensor<3072x3072xf32>) -> tensor<1x128x3072xf32>
+        %k = "tensor.matmul"(%n1, %wk) : (tensor<1x128x3072xf32>, tensor<3072x3072xf32>) -> tensor<1x128x3072xf32>
+        %v = "tensor.matmul"(%n1, %wv) : (tensor<1x128x3072xf32>, tensor<3072x3072xf32>) -> tensor<1x128x3072xf32>
+        %attn = "tensor.grouped_query_attention"(%q, %k, %v) : (tensor<1x128x3072xf32>, tensor<1x128x3072xf32>, tensor<1x128x3072xf32>) -> tensor<1x128x3072xf32>
+        %attn_proj = "tensor.matmul"(%attn, %wo) : (tensor<1x128x3072xf32>, tensor<3072x3072xf32>) -> tensor<1x128x3072xf32>
+        %r1 = "tensor.add"(%x, %attn_proj) : (tensor<1x128x3072xf32>, tensor<1x128x3072xf32>) -> tensor<1x128x3072xf32>
+
+        // Pre-norm + FFN + Residual
+        %n2 = "tensor.rmsnorm"(%r1, %ln2_w) : (tensor<1x128x3072xf32>, tensor<3072xf32>) -> tensor<1x128x3072xf32>
+        %gate = "tensor.matmul"(%n2, %w_gate) : (tensor<1x128x3072xf32>, tensor<3072x8192xf32>) -> tensor<1x128x8192xf32>
+        %gate_act = "tensor.silu"(%gate) : (tensor<1x128x8192xf32>) -> tensor<1x128x8192xf32>
+        %up = "tensor.matmul"(%n2, %w_up) : (tensor<1x128x3072xf32>, tensor<3072x8192xf32>) -> tensor<1x128x8192xf32>
+        %gated = "tensor.mul"(%gate_act, %up) : (tensor<1x128x8192xf32>, tensor<1x128x8192xf32>) -> tensor<1x128x8192xf32>
+        %down = "tensor.matmul"(%gated, %w_down) : (tensor<1x128x8192xf32>, tensor<8192x3072xf32>) -> tensor<1x128x3072xf32>
+        %r2 = "tensor.add"(%r1, %down) : (tensor<1x128x3072xf32>, tensor<1x128x3072xf32>) -> tensor<1x128x3072xf32>
+
+        return %r2
+    }
+
+    // LM Head: final norm + linear projection to vocab
+    func @lm_head(%x: tensor<1x128x3072xf32>, %ln_w: tensor<3072xf32>, %lm_w: tensor<3072x32064xf32>) -> tensor<1x128x32064xf32> {
+        %normed = "tensor.rmsnorm"(%x, %ln_w) : (tensor<1x128x3072xf32>, tensor<3072xf32>) -> tensor<1x128x3072xf32>
+        %logits = "tensor.matmul"(%normed, %lm_w) : (tensor<1x128x3072xf32>, tensor<3072x32064xf32>) -> tensor<1x128x32064xf32>
+        return %logits
+    }
+}

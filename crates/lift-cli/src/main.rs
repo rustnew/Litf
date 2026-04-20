@@ -223,6 +223,12 @@ fn cmd_optimise(path: &std::path::Path, config_path: Option<&std::path::Path>, o
             "dce" => pm.add_pass(Box::new(lift_opt::DeadCodeElimination)),
             "tensor-fusion" => pm.add_pass(Box::new(lift_opt::TensorFusion)),
             "gate-cancellation" => pm.add_pass(Box::new(lift_opt::GateCancellation)),
+            "rotation-merge" => pm.add_pass(Box::new(lift_opt::RotationMerge)),
+            "flash-attention" => pm.add_pass(Box::new(lift_opt::FlashAttentionPass::default())),
+            "cse" => pm.add_pass(Box::new(lift_opt::CommonSubexprElimination)),
+            "quantisation-pass" => pm.add_pass(Box::new(lift_opt::QuantisationPass::default())),
+            "noise-aware-schedule" => pm.add_pass(Box::new(lift_opt::NoiseAwareSchedule)),
+            "layout-mapping" => pm.add_pass(Box::new(lift_opt::LayoutMapping)),
             _ => {
                 tracing::warn!("Unknown pass: {}", pass_name);
             }

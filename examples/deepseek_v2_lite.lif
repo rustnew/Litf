@@ -1,0 +1,104 @@
+#dialect tensor
+
+// DeepSeek-V2-Lite — 16B parameters (MoE architecture)
+// Architecture: 28 layers, 2048 hidden, 16 heads, 128 head_dim
+// MoE: 64 experts, top-2 routing, intermediate=10944
+// Vocab: 102400, Max seq: 4096, RoPE, SiLU, Multi-Head Latent Attention
+
+module @deepseek_v2_lite {
+
+    // Token embedding
+    func @embedding(%input_ids: tensor<1x128xi32>, %embed_table: tensor<102400x2048xf32>) -> tensor<1x128x2048xf32> {
+        %emb = "tensor.embedding"(%input_ids, %embed_table) : (tensor<1x128xi32>, tensor<102400x2048xf32>) -> tensor<1x128x2048xf32>
+        return %emb
+    }
+
+    // Multi-Head Attention with RoPE
+    func @attention(
+        %x: tensor<1x128x2048xf32>,
+        %wq: tensor<2048x2048xf32>,
+        %wk: tensor<2048x2048xf32>,
+        %wv: tensor<2048x2048xf32>,
+        %wo: tensor<2048x2048xf32>
+    ) -> tensor<1x128x2048xf32> {
+        %q = "tensor.matmul"(%x, %wq) : (tensor<1x128x2048xf32>, tensor<2048x2048xf32>) -> tensor<1x128x2048xf32>
+        %k = "tensor.matmul"(%x, %wk) : (tensor<1x128x2048xf32>, tensor<2048x2048xf32>) -> tensor<1x128x2048xf32>
+        %v = "tensor.matmul"(%x, %wv) : (tensor<1x128x2048xf32>, tensor<2048x2048xf32>) -> tensor<1x128x2048xf32>
+        %attn = "tensor.multi_head_attention"(%q, %k, %v) : (tensor<1x128x2048xf32>, tensor<1x128x2048xf32>, tensor<1x128x2048xf32>) -> tensor<1x128x2048xf32>
+        %out = "tensor.matmul"(%attn, %wo) : (tensor<1x128x2048xf32>, tensor<2048x2048xf32>) -> tensor<1x128x2048xf32>
+        return %out
+    }
+
+    // MoE Feed-Forward (64 experts, top-2 gating)
+    func @moe_ffn(
+        %x: tensor<1x128x2048xf32>,
+        %router_w: tensor<2048x64xf32>,
+        %expert_gate: tensor<2048x10944xf32>,
+        %expert_up: tensor<2048x10944xf32>,
+        %expert_down: tensor<10944x2048xf32>
+    ) -> tensor<1x128x2048xf32> {
+        // Router: compute expert scores
+        %router_logits = "tensor.matmul"(%x, %router_w) : (tensor<1x128x2048xf32>, tensor<2048x64xf32>) -> tensor<1x128x64xf32>
+        %router_probs = "tensor.softmax"(%router_logits) : (tensor<1x128x64xf32>) -> tensor<1x128x64xf32>
+
+        // Dispatch tokens to top-2 experts
+        %dispatched = "tensor.moe_dispatch"(%x, %router_probs) : (tensor<1x128x2048xf32>, tensor<1x128x64xf32>) -> tensor<1x128x2048xf32>
+
+        // Expert computation (SwiGLU)
+        %gate = "tensor.matmul"(%dispatched, %expert_gate) : (tensor<1x128x2048xf32>, tensor<2048x10944xf32>) -> tensor<1x128x10944xf32>
+        %gate_act = "tensor.silu"(%gate) : (tensor<1x128x10944xf32>) -> tensor<1x128x10944xf32>
+        %up = "tensor.matmul"(%dispatched, %expert_up) : (tensor<1x128x2048xf32>, tensor<2048x10944xf32>) -> tensor<1x128x10944xf32>
+        %gated = "tensor.mul"(%gate_act, %up) : (tensor<1x128x10944xf32>, tensor<1x128x10944xf32>) -> tensor<1x128x10944xf32>
+        %expert_out = "tensor.matmul"(%gated, %expert_down) : (tensor<1x128x10944xf32>, tensor<10944x2048xf32>) -> tensor<1x128x2048xf32>
+
+        // Combine expert outputs
+        %combined = "tensor.moe_combine"(%expert_out, %router_probs) : (tensor<1x128x2048xf32>, tensor<1x128x64xf32>) -> tensor<1x128x2048xf32>
+        return %combined
+    }
+
+    // Single Transformer Layer (pre-norm + attention + MoE FFN)
+    func @layer(
+        %x: tensor<1x128x2048xf32>,
+        %ln1_w: tensor<2048xf32>,
+        %wq: tensor<2048x2048xf32>,
+        %wk: tensor<2048x2048xf32>,
+        %wv: tensor<2048x2048xf32>,
+        %wo: tensor<2048x2048xf32>,
+        %ln2_w: tensor<2048xf32>,
+        %router_w: tensor<2048x64xf32>,
+        %expert_gate: tensor<2048x10944xf32>,
+        %expert_up: tensor<2048x10944xf32>,
+        %expert_down: tensor<10944x2048xf32>
+    ) -> tensor<1x128x2048xf32> {
+        // Pre-norm + Attention + Residual
+        %n1 = "tensor.rmsnorm"(%x, %ln1_w) : (tensor<1x128x2048xf32>, tensor<2048xf32>) -> tensor<1x128x2048xf32>
+        %q = "tensor.matmul"(%n1, %wq) : (tensor<1x128x2048xf32>, tensor<2048x2048xf32>) -> tensor<1x128x2048xf32>
+        %k = "tensor.matmul"(%n1, %wk) : (tensor<1x128x2048xf32>, tensor<2048x2048xf32>) -> tensor<1x128x2048xf32>
+        %v = "tensor.matmul"(%n1, %wv) : (tensor<1x128x2048xf32>, tensor<2048x2048xf32>) -> tensor<1x128x2048xf32>
+        %attn = "tensor.multi_head_attention"(%q, %k, %v) : (tensor<1x128x2048xf32>, tensor<1x128x2048xf32>, tensor<1x128x2048xf32>) -> tensor<1x128x2048xf32>
+        %attn_proj = "tensor.matmul"(%attn, %wo) : (tensor<1x128x2048xf32>, tensor<2048x2048xf32>) -> tensor<1x128x2048xf32>
+        %r1 = "tensor.add"(%x, %attn_proj) : (tensor<1x128x2048xf32>, tensor<1x128x2048xf32>) -> tensor<1x128x2048xf32>
+
+        // Pre-norm + MoE FFN + Residual
+        %n2 = "tensor.rmsnorm"(%r1, %ln2_w) : (tensor<1x128x2048xf32>, tensor<2048xf32>) -> tensor<1x128x2048xf32>
+        %router_logits = "tensor.matmul"(%n2, %router_w) : (tensor<1x128x2048xf32>, tensor<2048x64xf32>) -> tensor<1x128x64xf32>
+        %router_probs = "tensor.softmax"(%router_logits) : (tensor<1x128x64xf32>) -> tensor<1x128x64xf32>
+        %dispatched = "tensor.moe_dispatch"(%n2, %router_probs) : (tensor<1x128x2048xf32>, tensor<1x128x64xf32>) -> tensor<1x128x2048xf32>
+        %gate = "tensor.matmul"(%dispatched, %expert_gate) : (tensor<1x128x2048xf32>, tensor<2048x10944xf32>) -> tensor<1x128x10944xf32>
+        %gate_act = "tensor.silu"(%gate) : (tensor<1x128x10944xf32>) -> tensor<1x128x10944xf32>
+        %up = "tensor.matmul"(%dispatched, %expert_up) : (tensor<1x128x2048xf32>, tensor<2048x10944xf32>) -> tensor<1x128x10944xf32>
+        %gated = "tensor.mul"(%gate_act, %up) : (tensor<1x128x10944xf32>, tensor<1x128x10944xf32>) -> tensor<1x128x10944xf32>
+        %expert_out = "tensor.matmul"(%gated, %expert_down) : (tensor<1x128x10944xf32>, tensor<10944x2048xf32>) -> tensor<1x128x2048xf32>
+        %combined = "tensor.moe_combine"(%expert_out, %router_probs) : (tensor<1x128x2048xf32>, tensor<1x128x64xf32>) -> tensor<1x128x2048xf32>
+        %r2 = "tensor.add"(%r1, %combined) : (tensor<1x128x2048xf32>, tensor<1x128x2048xf32>) -> tensor<1x128x2048xf32>
+
+        return %r2
+    }
+
+    // LM Head
+    func @lm_head(%x: tensor<1x128x2048xf32>, %ln_w: tensor<2048xf32>, %lm_w: tensor<2048x102400xf32>) -> tensor<1x128x102400xf32> {
+        %normed = "tensor.rmsnorm"(%x, %ln_w) : (tensor<1x128x2048xf32>, tensor<2048xf32>) -> tensor<1x128x2048xf32>
+        %logits = "tensor.matmul"(%normed, %lm_w) : (tensor<1x128x2048xf32>, tensor<2048x102400xf32>) -> tensor<1x128x102400xf32>
+        return %logits
+    }
+}

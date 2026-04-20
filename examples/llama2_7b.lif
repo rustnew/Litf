@@ -1,0 +1,50 @@
+#dialect tensor
+
+// LLaMA-2 7B — Meta AI
+// Architecture: 32 layers, 4096 hidden, 32 heads, 128 head_dim, 11008 intermediate
+// Vocab: 32000, Max seq: 4096, RoPE, SiLU, GQA (32 KV heads)
+
+module @llama2_7b {
+
+    func @embedding(%ids: tensor<1x256xi32>, %table: tensor<32000x4096xf32>) -> tensor<1x256x4096xf32> {
+        %emb = "tensor.embedding"(%ids, %table) : (tensor<1x256xi32>, tensor<32000x4096xf32>) -> tensor<1x256x4096xf32>
+        return %emb
+    }
+
+    func @layer(
+        %x: tensor<1x256x4096xf32>,
+        %ln1_w: tensor<4096xf32>,
+        %wq: tensor<4096x4096xf32>,
+        %wk: tensor<4096x4096xf32>,
+        %wv: tensor<4096x4096xf32>,
+        %wo: tensor<4096x4096xf32>,
+        %ln2_w: tensor<4096xf32>,
+        %w_gate: tensor<4096x11008xf32>,
+        %w_up: tensor<4096x11008xf32>,
+        %w_down: tensor<11008x4096xf32>
+    ) -> tensor<1x256x4096xf32> {
+        %n1 = "tensor.rmsnorm"(%x, %ln1_w) : (tensor<1x256x4096xf32>, tensor<4096xf32>) -> tensor<1x256x4096xf32>
+        %q = "tensor.matmul"(%n1, %wq) : (tensor<1x256x4096xf32>, tensor<4096x4096xf32>) -> tensor<1x256x4096xf32>
+        %k = "tensor.matmul"(%n1, %wk) : (tensor<1x256x4096xf32>, tensor<4096x4096xf32>) -> tensor<1x256x4096xf32>
+        %v = "tensor.matmul"(%n1, %wv) : (tensor<1x256x4096xf32>, tensor<4096x4096xf32>) -> tensor<1x256x4096xf32>
+        %attn = "tensor.grouped_query_attention"(%q, %k, %v) : (tensor<1x256x4096xf32>, tensor<1x256x4096xf32>, tensor<1x256x4096xf32>) -> tensor<1x256x4096xf32>
+        %attn_proj = "tensor.matmul"(%attn, %wo) : (tensor<1x256x4096xf32>, tensor<4096x4096xf32>) -> tensor<1x256x4096xf32>
+        %r1 = "tensor.add"(%x, %attn_proj) : (tensor<1x256x4096xf32>, tensor<1x256x4096xf32>) -> tensor<1x256x4096xf32>
+
+        %n2 = "tensor.rmsnorm"(%r1, %ln2_w) : (tensor<1x256x4096xf32>, tensor<4096xf32>) -> tensor<1x256x4096xf32>
+        %gate = "tensor.matmul"(%n2, %w_gate) : (tensor<1x256x4096xf32>, tensor<4096x11008xf32>) -> tensor<1x256x11008xf32>
+        %gate_act = "tensor.silu"(%gate) : (tensor<1x256x11008xf32>) -> tensor<1x256x11008xf32>
+        %up = "tensor.matmul"(%n2, %w_up) : (tensor<1x256x4096xf32>, tensor<4096x11008xf32>) -> tensor<1x256x11008xf32>
+        %gated = "tensor.mul"(%gate_act, %up) : (tensor<1x256x11008xf32>, tensor<1x256x11008xf32>) -> tensor<1x256x11008xf32>
+        %down = "tensor.matmul"(%gated, %w_down) : (tensor<1x256x11008xf32>, tensor<11008x4096xf32>) -> tensor<1x256x4096xf32>
+        %r2 = "tensor.add"(%r1, %down) : (tensor<1x256x4096xf32>, tensor<1x256x4096xf32>) -> tensor<1x256x4096xf32>
+
+        return %r2
+    }
+
+    func @lm_head(%x: tensor<1x256x4096xf32>, %ln_w: tensor<4096xf32>, %lm_w: tensor<4096x32000xf32>) -> tensor<1x256x32000xf32> {
+        %normed = "tensor.rmsnorm"(%x, %ln_w) : (tensor<1x256x4096xf32>, tensor<4096xf32>) -> tensor<1x256x4096xf32>
+        %logits = "tensor.matmul"(%normed, %lm_w) : (tensor<1x256x4096xf32>, tensor<4096x32000xf32>) -> tensor<1x256x32000xf32>
+        return %logits
+    }
+}

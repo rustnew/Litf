@@ -99,6 +99,20 @@ impl ConfigParser {
             if let Some(max_iter) = opt.get("max_iterations") {
                 config.optimisation.max_iterations = max_iter.parse().unwrap_or(10);
             }
+            if let Some(passes) = opt.get("passes") {
+                config.optimisation.passes = passes
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+            if let Some(disabled) = opt.get("disabled_passes") {
+                config.optimisation.disabled_passes = disabled
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
         }
 
         if let Some(sim) = kv_map.get("simulation") {
